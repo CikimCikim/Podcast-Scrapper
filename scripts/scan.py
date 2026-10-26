@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from bot.scan import D1Sync, Net, Scanner, custom_site, ia_site
+from bot.scan import EXTS, D1Sync, Net, Scanner, custom_site, ia_site
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -22,6 +22,7 @@ def main() -> int:
     ap.add_argument("--ia-type", default="both", choices=["books", "audio", "both"])
     ap.add_argument("--ia-limit", type=int, default=100)
     ap.add_argument("--budget-min", type=float, default=float(os.environ.get("BUDGET_MIN", "320")), help="stop politely after N minutes")
+    ap.add_argument("--types", default="", help="file types to keep, e.g. pdf,mp3 (default: all known: pdf, audio, video, office, epub, zip, srt...)")
     ap.add_argument("--no-measure", action="store_true", help="skip HEAD requests for file sizes")
     ap.add_argument("--fresh", action="store_true", help="ignore saved progress")
     ap.add_argument("--rescan-days", type=int, default=7)
@@ -42,6 +43,7 @@ def main() -> int:
     if a.ia:
         sites.append(ia_site(a.ia, a.ia_type, a.ia_limit))
 
+    exts = tuple("." + t.strip(" .") for t in a.types.split(",") if t.strip()) or EXTS
     db = D1Sync(os.environ["CF_ACCOUNT_ID"], os.environ["CF_D1_ID"], os.environ["CF_API_TOKEN"])
     net = Net()
     deadline = time.monotonic() + a.budget_min * 60
@@ -51,7 +53,7 @@ def main() -> int:
             print(f"[{s['id']}] skipped: time budget used up (next run continues)")
             continue
         try:
-            Scanner(s, net, db, a.state_dir, deadline, measure=not a.no_measure, rescan_days=a.rescan_days, fresh=a.fresh).run()
+            Scanner(s, net, db, a.state_dir, deadline, measure=not a.no_measure, rescan_days=a.rescan_days, fresh=a.fresh, exts=exts).run()
         except Exception as exc:  # noqa: BLE001  one broken site must not stop the others
             failed += 1
             print(f"[{s['id']}] FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

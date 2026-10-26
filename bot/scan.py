@@ -1,3 +1,4 @@
+# Only pages that carry at least one wanted file (pdf, audio ...) are written to D1.
 # bot/scan.py - non-interactive site scanner (port of learning_sites_scanner.py): finds pages + downloadable files of
 # learning sites and writes the catalog to Cloudflare D1 (tables cat_sites / cat_pages / cat_files). Nothing is downloaded.
 from __future__ import annotations
@@ -195,7 +196,7 @@ def body_excerpt(html: str, n: int = BODY_CHARS) -> str:
 # ---------------------------------------------------------------- scanner
 class Scanner:
     def __init__(self, site: dict, net: Net, db: D1Sync, state_dir: str, deadline: float, measure: bool = True,
-                 rescan_days: int = 7, fresh: bool = False) -> None:
+                 rescan_days: int = 7, fresh: bool = False, exts: tuple = EXTS) -> None:
         self.site, self.net, self.db = site, net, db
         self.id = site["id"]
         self.base = site["base"].rstrip("/")
@@ -209,6 +210,7 @@ class Scanner:
         self.workers = site.get("workers", 6)
         self.delay = site.get("delay", 0.5)
         self.deadline, self.measure, self.rescan_days, self.fresh = deadline, measure, rescan_days, fresh
+        self.exts = tuple(exts)
         self.state_path = os.path.join(state_dir, f"{self.id}.json.gz")
         self.robots = None
         self.max_pages = site.get("max_pages", MAX_PAGES)
@@ -332,6 +334,7 @@ class Scanner:
                     if not html:
                         continue
                     links, files = extract(html, url)
+                    files = [f for f in files if file_ext(f) in self.exts]
                     title, desc = page_meta(html)
                     pages[url] = {"t": title[:200], "d": desc[:400], "b": body_excerpt(html), "f": files}
                     for lk in links:
@@ -463,7 +466,7 @@ class Scanner:
         if not new:
             return
         page_rows = [(self.id, u, self.section_of(u), st["pages"][u]["t"], st["pages"][u]["d"], st["pages"][u]["b"],
-                      st["via"].get(u, "links"), now) for u in new if u not in self.known_pages]
+                      st["via"].get(u, "links"), now) for u in new if st["pages"][u]["f"] and u not in self.known_pages]
         owner: dict[str, str] = {}
         for u in new:
             for f in st["pages"][u]["f"]:
@@ -484,6 +487,8 @@ class Scanner:
         self.db.put_files(file_rows)
         for u in new:
             st["pages"][u]["ok"] = True
+            if not st["pages"][u]["f"]:
+                st["pages"][u]["b"] = ""             # pages without files are not stored in D1; keep state small
         self.known_pages.update(r[1] for r in page_rows)
         self.known_files.update(r[1] for r in file_rows)
         log(f"[{self.id}] D1 +{len(page_rows)} pages +{len(file_rows)} files")

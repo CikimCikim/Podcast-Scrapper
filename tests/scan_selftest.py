@@ -70,24 +70,30 @@ with tempfile.TemporaryDirectory() as tmp:
     status = Scanner(site, Net(), db, tmp, time.monotonic() + 60).run()
     assert status == "complete", status
     urls = {r["url"].replace(base, "") for r in con.execute("select url from cat_pages")}
-    assert urls == {"/", "/grammar/a.html", "/grammar/b.html", "/grammar/c.html", "/listen/"}, urls   # /private blocked by robots, sitemap page found
+    assert urls == {"/", "/grammar/a.html", "/grammar/b.html", "/listen/"}, urls   # only pages with files; /private blocked by robots; c.html (sitemap, no files) not stored
     files = {r["url"].replace(base, ""): r["bytes"] for r in con.execute("select url,bytes from cat_files")}
     assert set(files) == {"/x.pdf", "/files/a.pdf", "/files/b.docx", "/audio/1.mp3", "/audio/2.mp3"} or "/audio/1.mp3" in files, files
     assert all(v == 1234 for k, v in files.items() if k.startswith("/") and not k.startswith("//")), files
     row = con.execute("select * from cat_pages where url like '%a.html'").fetchone()
     assert row["title"] == "Present perfect" and row["section"] == "grammar" and "some words here" in row["body"] and "var x" not in row["body"], dict(row)
     s = con.execute("select * from cat_sites").fetchone()
-    assert (s["status"], s["pages"], s["files"]) == ("complete", 5, len(files)), dict(s)
+    assert (s["status"], s["pages"], s["files"]) == ("complete", 4, len(files)), dict(s)
     # second run: up to date, nothing refetched
     assert Scanner(site, Net(), db, tmp, time.monotonic() + 60).run() == "complete"
     # forced rescan: nothing duplicated
     Scanner(site, Net(), db, tmp, time.monotonic() + 60, fresh=True).run()
-    assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 5
+    assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 4
     # time budget exhausted -> partial, then a later run resumes from saved state
     con.execute("delete from cat_pages"); con.execute("delete from cat_files"); con.commit()
     with tempfile.TemporaryDirectory() as tmp2:
         st = Scanner(site, Net(), db, tmp2, time.monotonic() - 1).run()
         assert st == "partial", st
         assert Scanner(site, Net(), db, tmp2, time.monotonic() + 60).run() == "complete"
-        assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 5
+        assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 4
+    # only wanted types
+    con.execute("delete from cat_pages"); con.execute("delete from cat_files"); con.commit()
+    with tempfile.TemporaryDirectory() as tmp3:
+        Scanner(site, Net(), db, tmp3, time.monotonic() + 60, exts=(".mp3",)).run()
+        assert {r["ext"] for r in con.execute("select ext from cat_files")} == {"mp3"}
+        assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 1     # only /listen/
 print("scan selftest OK")
