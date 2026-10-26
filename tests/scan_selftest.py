@@ -96,4 +96,10 @@ with tempfile.TemporaryDirectory() as tmp:
         Scanner(site, Net(), db, tmp3, time.monotonic() + 60, exts=(".mp3",)).run()
         assert {r["ext"] for r in con.execute("select ext from cat_files")} == {"mp3"}
         assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 1     # only /listen/
+# the site dropdown in scan.yml must list every id of sites.json (regenerate it when you add a site)
+import json
+ids = [x["id"] for x in json.loads((Path(__file__).resolve().parent.parent / "sites.json").read_text("utf-8"))["sites"]]
+yml = (Path(__file__).resolve().parent.parent / ".github/workflows/scan.yml").read_text("utf-8")
+missing = [i for i in ids if f"          - {i}\n" not in yml]
+assert not missing, f"add to the site dropdown in scan.yml: {missing}"
 print("scan selftest OK")

@@ -5,10 +5,64 @@ on:
   schedule: [{cron: "30 3 * * 0"}]          # weekly
   workflow_dispatch:
     inputs:
-      sites: {description: "Comma list of site ids from sites.json (empty = all)", default: ""}
-      url:   {description: "Extra site to scan, e.g. https://example.com/english", default: ""}
-      ia:    {description: "Internet Archive search words", default: ""}
-      fresh: {description: "Ignore saved progress", type: boolean, default: false}
+      site:
+        description: "Site to scan (pick one)"
+        type: choice
+        default: all
+        options:
+          - all
+          - bbc
+          - peg
+          - voa
+          - britcouncil
+          - bne
+          - lingua
+          - teachingenglish
+          - elllo
+          - busyteacher
+          - oxford
+          - englishclub
+          - usingenglish
+          - englishpage
+          - camgrammar
+          - purdueowl
+          - uncwriting
+          - esllab
+          - newsinlevels
+          - openlearn
+          - ielts
+          - camexams
+          - toefl
+          - ielts_org
+          - wikibooks_en
+      sites:
+        description: "Several sites: comma list, e.g. bbc,peg (overrides the dropdown)"
+        default: ""
+      types:
+        description: "File types to keep"
+        type: choice
+        default: all
+        options:
+          - all
+          - pdf
+          - audio
+          - pdf + audio
+          - documents
+          - video
+      measure:
+        description: "Check file sizes (slower)"
+        type: boolean
+        default: true
+      fresh:
+        description: "Ignore saved progress (tick this after changing file types)"
+        type: boolean
+        default: false
+      url:
+        description: "Extra site to scan, e.g. https://example.com/english"
+        default: ""
+      ia:
+        description: "Internet Archive search words"
+        default: ""
 permissions: {contents: read}
 jobs:
   plan:
@@ -20,6 +74,7 @@ jobs:
       - id: m
         env:
           SITES: ${{ inputs.sites }}
+          SITE: ${{ inputs.site }}
           URL: ${{ inputs.url }}
           IA: ${{ inputs.ia }}
         run: |
@@ -29,6 +84,8 @@ jobs:
           want = [x.strip() for x in os.environ["SITES"].split(",") if x.strip()]
           if want:
               out = [i for i in ids if i in want]
+          elif os.environ["SITE"] not in ("", "all"):
+              out = [os.environ["SITE"]]
           elif os.environ["URL"] or os.environ["IA"]:
               out = []
           else:
@@ -69,9 +126,21 @@ jobs:
           URL: ${{ inputs.url }}
           IA: ${{ inputs.ia }}
           FRESH: ${{ inputs.fresh && '1' || '' }}
+          TYPES: ${{ inputs.types }}
+          MEASURE: ${{ inputs.measure }}
         run: |
           args=()
           [ -n "$FRESH" ] && args+=(--fresh)
+          [ "$MEASURE" = "false" ] && args+=(--no-measure)
+          case "$TYPES" in
+            pdf) t=pdf;;
+            audio) t=mp3,m4a,wav,ogg,aac;;
+            "pdf + audio") t=pdf,mp3,m4a,wav,ogg,aac;;
+            documents) t=pdf,doc,docx,rtf,ppt,pptx,xls,xlsx,epub;;
+            video) t=mp4,webm,mov;;
+            *) t="";;
+          esac
+          [ -n "$t" ] && args+=(--types "$t")
           if [ "$SITE" = "_extra" ]; then
             [ -n "$URL" ] && args+=(--url "$URL")
             [ -n "$IA" ] && args+=(--ia "$IA")
