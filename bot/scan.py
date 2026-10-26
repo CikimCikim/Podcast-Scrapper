@@ -42,6 +42,7 @@ def log(msg: str) -> None:
 # ---------------------------------------------------------------- D1 (sync REST)
 class D1Sync:
     """Cloudflare D1 REST. `poster(url, payload) -> (status, json)` can be replaced in tests."""
+    PACE = 0.15                                  # pause after each request (be gentle with the Cloudflare API)
     CHUNK_PAGES, CHUNK_FILES = 12, 12            # D1: max ~100 bound parameters per statement
 
     def __init__(self, account: str, db: str, token: str, poster=None) -> None:
@@ -53,7 +54,7 @@ class D1Sync:
     def q(self, sql: str, params: list | None = None) -> list[dict]:
         payload = {"sql": sql, "params": params or []}
         err = ""
-        for attempt in range(4):
+        for attempt in range(6):
             if self.poster:
                 status, data = self.poster(self.url, payload)
             else:
@@ -63,8 +64,14 @@ class D1Sync:
                 except (requests.RequestException, ValueError) as exc:
                     status, data = 0, {"errors": [str(exc)]}
             if status == 200 and data.get("success"):
+                SLEEP(self.PACE)
                 return data["result"][0].get("results", [])
             err = f"D1 error {status}: {data.get('errors')}"
+            if status in (401, 403):                 # Cloudflare sometimes answers 'Authentication error' for a moment under load: wait longer
+                if attempt < 5:
+                    log(f"  {err} - waiting, retry {attempt + 1}/5")
+                    SLEEP(10 * (attempt + 1))
+                continue
             if status in (0, 429, 500, 502, 503):
                 SLEEP(2 * (attempt + 1))
                 continue
@@ -558,13 +565,16 @@ class Scanner:
             self.st["failed"] = []
             self.known_pages = {u for u, p in st["pages"].items() if p.get("ok")}
             self.known_files = {f for u in self.known_pages for f in st["pages"][u]["f"]}
-        if self.site.get("ia"):
-            self.ia_crawl()
-        else:
-            self.crawl()
-            if self.site.get("probe") and not self.out_of_time() and self.probe_dates():
+        try:                                                       # whatever happens, keep the progress made so far
+            if self.site.get("ia"):
+                self.ia_crawl()
+            else:
                 self.crawl()
-        self.flush()
+                if self.site.get("probe") and not self.out_of_time() and self.probe_dates():
+                    self.crawl()
+            self.flush()
+        finally:
+            self.save_state()
         if not self.st["queue"] and not self.site.get("ia"):
             self.reassign_owners()
         if not self.st["queue"]:

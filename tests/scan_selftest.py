@@ -115,4 +115,31 @@ ids = [x["id"] for x in json.loads((Path(__file__).resolve().parent.parent / "si
 yml = (Path(__file__).resolve().parent.parent / ".github/workflows/scan.yml").read_text("utf-8")
 missing = [i for i in ids if f"          - {i}\n" not in yml]
 assert not missing, f"add to the site dropdown in scan.yml: {missing}"
+# D1 answering 401 'Authentication error' a few times, then working: the run must survive
+calls = {"n": 0}
+inner = db.poster
+def flaky(url, payload):
+    calls["n"] += 1
+    if payload["sql"].startswith("INSERT OR IGNORE INTO cat_files") and calls["n"] % 3 == 0 and calls["n"] < 30:
+        return 401, {"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]}
+    return inner(url, payload)
+db.poster = flaky
+con.execute("delete from cat_pages"); con.execute("delete from cat_files"); con.commit()
+with tempfile.TemporaryDirectory() as tmp4:
+    assert Scanner(site, Net(), db, tmp4, time.monotonic() + 60).run() == "complete"
+    assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 5
+# D1 failing for good: the error comes out, but the crawl progress is saved for the next run
+def broken(url, payload):
+    if payload["sql"].startswith("INSERT"):
+        return 401, {"success": False, "errors": ["Authentication error"]}
+    return inner(url, payload)
+db.poster = broken
+import gzip, os
+with tempfile.TemporaryDirectory() as tmp5:
+    try:
+        Scanner(site, Net(), db, tmp5, time.monotonic() + 60, fresh=True).run()
+        raise AssertionError("should have failed")
+    except RuntimeError as e:
+        assert "401" in str(e)
+    assert os.path.exists(os.path.join(tmp5, "t.json.gz"))
 print("scan selftest OK")
