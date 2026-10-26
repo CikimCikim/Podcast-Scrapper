@@ -157,4 +157,13 @@ with tempfile.TemporaryDirectory() as tmp6:
     assert sc.st["done_at"] == 0 and sc.st["failed"], sc.st
     assert con.execute("select status from cat_sites where site_id='d'").fetchone()["status"] == "blocked"
     assert Scanner(dsite, Net(), db, tmp6, time.monotonic() + 60).run() == "blocked"   # retried, not "up to date"
+# unreachable host: gives up after a few connection errors instead of retrying every URL for minutes
+import socket
+sk = socket.socket(); sk.bind(("127.0.0.1", 0)); dead_port = sk.getsockname()[1]; sk.close()     # nothing listens here
+nsite = {**site, "id": "n", "base": f"http://127.0.0.1:{dead_port}"}
+with tempfile.TemporaryDirectory() as tmp7:
+    net7 = Net()
+    t0 = time.monotonic()
+    assert Scanner(nsite, net7, db, tmp7, time.monotonic() + 60).run() == "blocked"
+    assert net7.fails[f"127.0.0.1:{dead_port}"] >= scan.DEAD_AFTER and time.monotonic() - t0 < 10
 print("scan selftest OK")

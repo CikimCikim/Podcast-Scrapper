@@ -23,6 +23,8 @@ UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Fi
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-US,en;q=0.5"}
 BLOCKED = (401, 403, 451)                                # "go away" answers: a failure, not a missing page
+CONNECT_TIMEOUT = 10                                     # seconds to wait for a connection (read timeout stays per call)
+DEAD_AFTER = 4                                           # connection failures in a row (and no success) = host unreachable
 BLOCK_STOP = 10                                          # give up on a site that only ever answers BLOCKED
 EXTS = (".pdf", ".mp3", ".m4a", ".wav", ".ogg", ".aac", ".mp4", ".webm", ".mov", ".doc", ".docx", ".rtf", ".txt",
         ".epub", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".srt", ".vtt")
@@ -115,16 +117,23 @@ class Net:
         ad = HTTPAdapter(pool_connections=16, pool_maxsize=32)
         self.s.mount("https://", ad)
         self.s.mount("http://", ad)
+        self.fails: Counter = Counter()                  # host -> connection failures in a row
         self.codes: Counter = Counter()                  # HTTP status -> how many page requests got it (0 = no answer)
 
     def request(self, method: str, url: str, timeout: int = 30, retries: int = 4, headers: dict | None = None, stream: bool = False):
         """Response, or None if every attempt failed. Waits and retries on 'slow down'."""
+        host = urlparse(url).netloc.lower()
         for attempt in range(retries):
+            if self.fails[host] >= DEAD_AFTER:           # host never answers (IP blocked / down): stop wasting minutes
+                return None
             try:
-                r = self.s.request(method, url, timeout=timeout, allow_redirects=True, headers=headers, stream=stream)
+                r = self.s.request(method, url, timeout=(min(CONNECT_TIMEOUT, timeout), timeout), allow_redirects=True,
+                                   headers=headers, stream=stream)
             except requests.RequestException:
+                self.fails[host] += 1
                 SLEEP(1.5 * (attempt + 1))
                 continue
+            self.fails[host] = 0
             if r.status_code == 403 and attempt < 2 and method == "GET":
                 r.close()                                # often a one-off bot check: retry with a Referer, slowly
                 headers = {**(headers or {}), "Referer": urlparse(url)._replace(path="/", query="").geturl()}
