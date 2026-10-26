@@ -47,5 +47,3 @@ jobs:
           git config user.name "langfeed"; git config user.email "langfeed@users.noreply.github.com"
           mkdir -p state; git add -A state
           git diff --cached --quiet || (git commit -m "state" && git pull --rebase -q && git push)
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()

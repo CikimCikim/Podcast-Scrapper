@@ -99,8 +99,6 @@ jobs:
         run: |
           echo "## Scan plan" >> "$GITHUB_STEP_SUMMARY"
           echo "Sites: \`${{ steps.m.outputs.matrix }}\`  (empty list = nothing to scan)" >> "$GITHUB_STEP_SUMMARY"
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()
   scan:
     needs: plan
     if: needs.plan.outputs.matrix != '[]'
@@ -169,5 +167,3 @@ jobs:
         with:
           path: scan_state
           key: scan-${{ matrix.site }}-${{ github.run_id }}
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()

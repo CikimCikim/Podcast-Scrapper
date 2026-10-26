@@ -105,11 +105,11 @@ class Net:
         self.s.mount("https://", ad)
         self.s.mount("http://", ad)
 
-    def request(self, method: str, url: str, timeout: int = 30, retries: int = 4):
+    def request(self, method: str, url: str, timeout: int = 30, retries: int = 4, headers: dict | None = None, stream: bool = False):
         """Response, or None if every attempt failed. Waits and retries on 'slow down'."""
         for attempt in range(retries):
             try:
-                r = self.s.request(method, url, timeout=timeout, allow_redirects=True)
+                r = self.s.request(method, url, timeout=timeout, allow_redirects=True, headers=headers, stream=stream)
             except requests.RequestException:
                 SLEEP(1.5 * (attempt + 1))
                 continue
@@ -138,12 +138,25 @@ class Net:
     def text(self, url: str) -> str:
         return self.page(url) or ""
 
-    def size(self, url: str) -> int:
-        r = self.request("HEAD", url, timeout=15, retries=2)
+    @staticmethod
+    def _len(r) -> int:
         try:
-            return int(r.headers.get("Content-Length") or 0) if r is not None else 0
+            return int(r.headers.get("Content-Length") or 0) if r is not None and r.status_code == 200 else 0
         except ValueError:
             return 0
+
+    def size(self, url: str) -> int:
+        """File size in bytes. HEAD first (no compression, so the server can say the length); if that gives
+        nothing (HEAD blocked, or no Content-Length) ask with GET and read only the headers."""
+        h = {"Accept-Encoding": "identity"}
+        r = self.request("HEAD", url, timeout=15, retries=2, headers=h)
+        n = self._len(r)
+        if not n:
+            g = self.request("GET", url, timeout=20, retries=1, headers=h, stream=True)
+            n = self._len(g)
+            if g is not None:
+                g.close()
+        return n
 
     def exists(self, url: str):
         r = self.request("HEAD", url, timeout=15, retries=2)
@@ -221,14 +234,14 @@ class Scanner:
     # ---- state
     def new_state(self) -> dict:
         seeds = self.seeds()
-        return {"pages": {}, "seen": set(seeds), "queue": deque(seeds), "failed": [], "via": {}, "sizes": {}, "done_at": 0}
+        return {"pages": {}, "seen": set(seeds), "queue": deque(seeds), "failed": [], "via": {}, "sizes": {}, "done_at": 0, "owner": {}}
 
     def load_state(self):
         try:
             with gzip.open(self.state_path, "rt", encoding="utf-8") as f:
                 s = json.load(f)
             s["seen"], s["queue"] = set(s["seen"]), deque(s["queue"])
-            for k, v in (("failed", []), ("via", {}), ("sizes", {}), ("done_at", 0)):
+            for k, v in (("failed", []), ("via", {}), ("sizes", {}), ("done_at", 0), ("owner", {})):
                 s.setdefault(k, v)
             return s
         except Exception:  # noqa: BLE001
@@ -240,7 +253,7 @@ class Scanner:
         tmp = self.state_path + ".tmp"
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
             json.dump({"pages": s["pages"], "seen": sorted(s["seen"]), "queue": list(s["queue"]), "failed": s["failed"],
-                       "via": s["via"], "sizes": s["sizes"], "done_at": s["done_at"]}, f)
+                       "via": s["via"], "sizes": s["sizes"], "done_at": s["done_at"], "owner": s["owner"]}, f)
         os.replace(tmp, self.state_path)
 
     # ---- url rules
@@ -485,6 +498,7 @@ class Scanner:
                       st["sizes"].get(f, 0), now) for f, u in owner.items()]
         self.db.put_pages(page_rows)
         self.db.put_files(file_rows)
+        st["owner"].update({r[1]: r[2] for r in file_rows})
         for u in new:
             st["pages"][u]["ok"] = True
             if not st["pages"][u]["f"]:
@@ -492,6 +506,24 @@ class Scanner:
         self.known_pages.update(r[1] for r in page_rows)
         self.known_files.update(r[1] for r in file_rows)
         log(f"[{self.id}] D1 +{len(page_rows)} pages +{len(file_rows)} files")
+
+    def reassign_owners(self) -> None:
+        """A file linked from several pages is stored once. Early on it may be filed under a hub page (e.g. 'all PDFs');
+        when the crawl is complete, move each file to the most specific page that links it (fewest files)."""
+        st, best = self.st, {}
+        for u, p in st["pages"].items():
+            n = len(p["f"])
+            for f in p["f"]:
+                if f not in best or (n, len(u)) < best[f][0]:
+                    best[f] = ((n, len(u)), u)
+        moved = 0
+        for f, (_, u) in best.items():
+            if f in st["owner"] and st["owner"][f] != u:
+                self.db.q("UPDATE cat_files SET page_url=?, section=? WHERE site_id=? AND url=?", [u, self.section_of(u), self.id, f])
+                st["owner"][f] = u
+                moved += 1
+        if moved:
+            log(f"[{self.id}] files moved to their own page: {moved}")
 
     # ---- one site
     def run(self) -> str:
@@ -525,6 +557,8 @@ class Scanner:
             if self.site.get("probe") and not self.out_of_time() and self.probe_dates():
                 self.crawl()
         self.flush()
+        if not self.st["queue"] and not self.site.get("ia"):
+            self.reassign_owners()
         if not self.st["queue"]:
             self.st["done_at"] = int(time.time())
         self.save_state()
