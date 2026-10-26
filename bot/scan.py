@@ -146,17 +146,19 @@ class Net:
             return 0
 
     def size(self, url: str) -> int:
-        """File size in bytes. HEAD first (no compression, so the server can say the length); if that gives
-        nothing (HEAD blocked, or no Content-Length) ask with GET and read only the headers."""
+        """File size in bytes; 0 = server did not say; -1 = the file does not exist (404/410).
+        HEAD first (no compression, so the server can state the length); if that gives nothing, GET and read only the headers."""
         h = {"Accept-Encoding": "identity"}
         r = self.request("HEAD", url, timeout=15, retries=2, headers=h)
         n = self._len(r)
-        if not n:
-            g = self.request("GET", url, timeout=20, retries=1, headers=h, stream=True)
-            n = self._len(g)
-            if g is not None:
-                g.close()
-        return n
+        if n:
+            return n
+        g = self.request("GET", url, timeout=20, retries=1, headers=h, stream=True)
+        n = self._len(g)
+        dead = g is not None and g.status_code in (404, 410)
+        if g is not None:
+            g.close()
+        return n if n or not dead else -1
 
     def exists(self, url: str):
         r = self.request("HEAD", url, timeout=15, retries=2)
@@ -478,8 +480,6 @@ class Scanner:
         new = [u for u, p in st["pages"].items() if not p.get("ok")]
         if not new:
             return
-        page_rows = [(self.id, u, self.section_of(u), st["pages"][u]["t"], st["pages"][u]["d"], st["pages"][u]["b"],
-                      st["via"].get(u, "links"), now) for u in new if st["pages"][u]["f"] and u not in self.known_pages]
         owner: dict[str, str] = {}
         for u in new:
             for f in st["pages"][u]["f"]:
@@ -494,6 +494,14 @@ class Scanner:
                     chunk = todo[i:i + 40]
                     for f, n in zip(chunk, ex.map(self.net.size, chunk)):
                         st["sizes"][f] = n
+        dead = {f for u in new for f in st["pages"][u]["f"] if st["sizes"].get(f) == -1}
+        if dead:                                          # broken links (404): not stored, and a page left with no file is not stored either
+            for u in new:
+                st["pages"][u]["f"] = [f for f in st["pages"][u]["f"] if f not in dead]
+            owner = {f: u for f, u in owner.items() if f not in dead}
+            log(f"[{self.id}] dead links skipped: {len(dead)}")
+        page_rows = [(self.id, u, self.section_of(u), st["pages"][u]["t"], st["pages"][u]["d"], st["pages"][u]["b"],
+                      st["via"].get(u, "links"), now) for u in new if st["pages"][u]["f"] and u not in self.known_pages]
         file_rows = [(self.id, f, u, self.section_of(u), file_ext(f)[1:], os.path.basename(unquote(urlparse(f).path))[:150],
                       st["sizes"].get(f, 0), now) for f, u in owner.items()]
         self.db.put_pages(page_rows)

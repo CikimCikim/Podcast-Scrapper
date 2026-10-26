@@ -11,10 +11,11 @@ import bot.scan as scan
 from bot.scan import D1Sync, Net, Scanner
 
 PAGES = {
-    "/": '<html><head><title>Home</title><meta name="description" content="Welcome"></head><body><a href="/grammar/a.html">A</a> <a href="/listen/">L</a> <a href="/x.pdf">pdf</a> <a href="/private/z.html">z</a> <a href="/hub.html">hub</a></body></html>',
+    "/": '<html><head><title>Home</title><meta name="description" content="Welcome"></head><body><a href="/grammar/a.html">A</a> <a href="/listen/">L</a> <a href="/x.pdf">pdf</a> <a href="/private/z.html">z</a> <a href="/hub.html">hub</a> <a href="/orphan.html">o</a></body></html>',
     "/grammar/a.html": '<html><head><title>Tense A</title></head><body><h1>Present perfect</h1><p>some words here</p><a href="/files/a.pdf">A</a> <a href="/files/nolen.pdf">N</a> <a href="/grammar/b.html">B</a><script>var x=1</script></body></html>',
-    "/grammar/b.html": '<html><body><h1>Past simple</h1><a href="/files/b.docx">B</a> <a href="/">home</a></body></html>',
+    "/grammar/b.html": '<html><body><h1>Past simple</h1><a href="/files/b.docx">B</a> <a href="/files/dead.pdf">dead</a> <a href="/">home</a></body></html>',
     "/listen/": '<html><body><h1>Listening</h1><a href="/audio/1.mp3">1</a><script>var u="https:\\/\\/127.0.0.1\\/audio\\/2.mp3"</script></body></html>',
+    "/orphan.html": '<html><body><h1>Only a dead link</h1><a href="/files/dead.pdf">d</a></body></html>',
     "/hub.html": '<html><body><h1>All files</h1><a href="/files/a.pdf">a</a><a href="/files/b.docx">b</a><a href="/files/nolen.pdf">n</a><a href="/x.pdf">x</a><a href="/audio/1.mp3">1</a></body></html>',
     "/private/z.html": "<html><body>secret</body></html>",
     "/robots.txt": "User-agent: *\nDisallow: /private/\nSitemap: http://{host}/sitemap.xml\n",
@@ -28,6 +29,8 @@ class H(BaseHTTPRequestHandler):
 
     def _send(self, head=False):
         path = self.path.split("?")[0]
+        if path == "/files/dead.pdf":                          # broken link
+            self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
         if path == "/files/nolen.pdf":                       # HEAD gives no length, GET does
             self.send_response(200); self.send_header("Content-Type", "application/pdf")
             if not head:
@@ -80,6 +83,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert urls == {"/", "/grammar/a.html", "/grammar/b.html", "/listen/", "/hub.html"}, urls   # only pages with files; /private blocked by robots; c.html (sitemap, no files) not stored
     files = {r["url"].replace(base, ""): r["bytes"] for r in con.execute("select url,bytes from cat_files")}
     assert set(files) == {"/x.pdf", "/files/a.pdf", "/files/b.docx", "/audio/1.mp3", "/audio/2.mp3", "/files/nolen.pdf"} or "/audio/1.mp3" in files, files
+    assert "/files/dead.pdf" not in files and "/orphan.html" not in urls, (files, urls)   # 404 files and pages with only dead links are not stored
     own = {r["url"].replace(base, ""): r["page_url"].replace(base, "") for r in con.execute("select url,page_url from cat_files")}
     assert own["/files/a.pdf"] == "/grammar/a.html" and own["/x.pdf"] == "/", own      # not filed under the hub page
     assert files["/files/nolen.pdf"] == 777 and files["/files/a.pdf"] == 1234, files
