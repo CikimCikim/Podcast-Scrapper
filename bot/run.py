@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 
 from bot import state
-from bot.feeds import Entry, parse_feed
+from bot.feeds import HEADERS, Entry, feed_urls, parse_feed
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = Path(os.environ.get("STATE_DIR", ROOT / "state"))
@@ -35,7 +35,7 @@ async def _download(client: httpx.AsyncClient, e: Entry, dest_dir: Path) -> Path
     ext = Path(e.media_url.split("?")[0]).suffix or ".mp3"
     dest = dest_dir / (f"{abs(hash(e.uid)) % 10**10}{ext}")
     try:
-        async with client.stream("GET", e.media_url, headers=UA) as r:
+        async with client.stream("GET", e.media_url, headers=HEADERS) as r:
             r.raise_for_status()
             with dest.open("wb") as f:
                 async for chunk in r.aiter_bytes(1 << 20):
@@ -57,9 +57,17 @@ def _caption(e: Entry) -> str:
 
 async def run_site(tg, site: dict, defaults: dict, seen_all: dict, topics: dict, http: httpx.AsyncClient) -> None:
     sid = site["id"]
-    r = await http.get(site["feed"], headers=UA)
-    r.raise_for_status()
-    entries = parse_feed(r.content)
+    entries = None
+    for u in feed_urls(site):
+        try:
+            r = await http.get(u, headers=HEADERS)
+            r.raise_for_status()
+            entries = parse_feed(r.content)
+            break
+        except Exception as exc:  # noqa: BLE001
+            print(f"[{sid}] feed failed {u}: {type(exc).__name__}", file=sys.stderr)
+    if entries is None:
+        raise RuntimeError("all feed URLs failed")
     first = sid not in seen_all
     send, seen_after = state.select_new(entries, seen_all.get(sid, []), first,
                                         site.get("initial_send", defaults["initial_send"]),

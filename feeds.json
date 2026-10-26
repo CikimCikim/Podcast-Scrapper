@@ -1,26 +1,33 @@
 {
-  "defaults": {"initial_send": 3, "max_per_run": 10},
+  "defaults": {
+    "initial_send": 3,
+    "max_per_run": 10
+  },
   "sites": [
     {
       "id": "bbc",
       "topic": "BBC Learning English",
       "feed": "https://podcasts.files.bbci.co.uk/p02pc9tn.rss",
       "performer": "BBC Learning English",
-      "_note": "6 Minute English. VERIFY with the check_feeds workflow."
+      "_note": "6 Minute English: verified 346 entries with audio."
     },
     {
       "id": "voa",
       "topic": "VOA Learning English",
-      "feed": "https://learningenglish.voanews.com/api/",
+      "feed": "https://learningenglish.voanews.com/podcast/?count=20",
       "performer": "VOA Learning English",
-      "_note": "VERIFY: replace with a real podcast/RSS URL from https://learningenglish.voanews.com/rssfeeds (the /api/ URL is only a guess)."
+      "_note": "Daily \"Learning English Podcast\" feed (verified count=2 returns mp3 enclosures; count=20 should be checked)."
     },
     {
       "id": "bne",
       "topic": "Breaking News English",
-      "feed": "https://breakingnewsenglish.com/podcast.xml",
+      "feed": [
+        "https://breakingnewsenglish.com/bne.xml",
+        "https://breakingnewsenglish.com/rss.xml",
+        "https://feeds.feedburner.com/breakingnewsenglish"
+      ],
       "performer": "Breaking News English",
-      "_note": "VERIFY: the feed URL is a guess; check with check_feeds."
+      "_note": "GitHub IP got HTTP 403 on podcast.xml (wrong URL). Real feeds from the site: bne.xml / rss.xml / feedburner; tried in order."
     }
   ]
 }

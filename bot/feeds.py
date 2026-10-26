@@ -72,3 +72,25 @@ def parse_feed(data: bytes | str) -> list[Entry]:
     else:
         out.reverse()          # feeds list newest first
     return out
+
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+           "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5"}
+
+
+def feed_urls(site: dict) -> list[str]:
+    f = site["feed"]
+    return [f] if isinstance(f, str) else list(f)
+
+
+def fetch_feed(http, site: dict) -> tuple[str, list[Entry]]:
+    """Sync helper: tries each feed URL in order, returns (url_used, entries)."""
+    err = None
+    for u in feed_urls(site):
+        try:
+            r = http.get(u, headers=HEADERS)
+            r.raise_for_status()
+            return u, parse_feed(r.content)
+        except Exception as exc:  # noqa: BLE001
+            err = f"{u}: {type(exc).__name__} {exc}"
+    raise RuntimeError(err or "no feed url")
