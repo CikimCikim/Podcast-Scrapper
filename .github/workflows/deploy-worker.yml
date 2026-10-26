@@ -40,7 +40,7 @@ jobs:
           echo "worker url: $URL"
           curl -sS "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL" --data-urlencode "secret_token=$SECRET" --data-urlencode 'allowed_updates=["message"]'
           echo
-          curl -sS "https://api.telegram.org/bot$TOKEN/setMyCommands" --data-urlencode 'commands=[{"command":"start","description":"show all commands"},{"command":"help","description":"show all commands"},{"command":"stats","description":"episodes per site"},{"command":"list","description":"latest episodes"},{"command":"find","description":"search titles"},{"command":"sites","description":"sites and topics"}]'
+          curl -sS "https://api.telegram.org/bot$TOKEN/setMyCommands" --data-urlencode 'commands=[{"command":"start","description":"show all commands"},{"command":"help","description":"show all commands"},{"command":"stats","description":"episodes per site"},{"command":"list","description":"latest episodes"},{"command":"find","description":"search titles"},{"command":"sites","description":"sites and topics"},{"command":"catalog","description":"scanned sites: pages and files"},{"command":"sections","description":"sections of a site"},{"command":"search","description":"search scanned pages"},{"command":"files","description":"list files (pdf, mp3...)"}]'
           echo
           curl -sS "https://api.telegram.org/bot$TOKEN/setChatMenuButton" --data-urlencode 'menu_button={"type":"commands"}'
           echo

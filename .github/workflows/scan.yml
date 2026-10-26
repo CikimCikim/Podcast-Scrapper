@@ -1,0 +1,87 @@
+name: scan
+# Scans the learning sites (sites.json) and writes pages + file links to D1 (tables cat_*). Nothing is downloaded.
+# One job per site, 4 at a time. Progress is kept in the Actions cache, so a site that does not finish in one run continues in the next.
+on:
+  schedule: [{cron: "30 3 * * 0"}]          # weekly
+  workflow_dispatch:
+    inputs:
+      sites: {description: "Comma list of site ids from sites.json (empty = all)", default: ""}
+      url:   {description: "Extra site to scan, e.g. https://example.com/english", default: ""}
+      ia:    {description: "Internet Archive search words", default: ""}
+      fresh: {description: "Ignore saved progress", type: boolean, default: false}
+permissions: {contents: read}
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        env:
+          SITES: ${{ inputs.sites }}
+          URL: ${{ inputs.url }}
+          IA: ${{ inputs.ia }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          ids = [s["id"] for s in json.load(open("sites.json"))["sites"]]
+          want = [x.strip() for x in os.environ["SITES"].split(",") if x.strip()]
+          if want:
+              out = [i for i in ids if i in want]
+          elif os.environ["URL"] or os.environ["IA"]:
+              out = []
+          else:
+              out = ids
+          if os.environ["URL"] or os.environ["IA"]:
+              out.append("_extra")
+          print("matrix=" + json.dumps(out))
+          PY
+  scan:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        site: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - name: Restore progress
+        uses: actions/cache/restore@v4
+        with:
+          path: scan_state
+          key: scan-${{ matrix.site }}-${{ github.run_id }}
+          restore-keys: scan-${{ matrix.site }}-
+      - name: Scan
+        env:
+          PYTHONPATH: .
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_ID: ${{ secrets.CF_D1_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BUDGET_MIN: "330"
+          SITE: ${{ matrix.site }}
+          URL: ${{ inputs.url }}
+          IA: ${{ inputs.ia }}
+          FRESH: ${{ inputs.fresh && '1' || '' }}
+        run: |
+          args=()
+          [ -n "$FRESH" ] && args+=(--fresh)
+          if [ "$SITE" = "_extra" ]; then
+            [ -n "$URL" ] && args+=(--url "$URL")
+            [ -n "$IA" ] && args+=(--ia "$IA")
+          else
+            args+=(--sites "$SITE")
+          fi
+          python scripts/scan.py "${args[@]}"
+      - name: Save progress
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: scan_state
+          key: scan-${{ matrix.site }}-${{ github.run_id }}

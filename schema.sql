@@ -22,3 +22,39 @@ CREATE TABLE IF NOT EXISTS episodes (
   PRIMARY KEY (site_id, uid)
 );
 CREATE INDEX IF NOT EXISTS ep_pub ON episodes(site_id, pub_ts);
+
+-- catalog written by scripts/scan.py (Actions -> scan)
+CREATE TABLE IF NOT EXISTS cat_sites (
+  site_id   TEXT PRIMARY KEY,
+  name      TEXT,
+  base      TEXT,
+  tags      TEXT,
+  status    TEXT,                    -- complete | partial
+  last_scan INTEGER,
+  pages     INTEGER,
+  files     INTEGER
+);
+CREATE TABLE IF NOT EXISTS cat_pages (
+  site_id  TEXT NOT NULL,
+  url      TEXT NOT NULL,
+  section  TEXT,
+  title    TEXT,
+  descr    TEXT,
+  body     TEXT,                     -- first ~1200 chars of page text (for /search)
+  via      TEXT,                     -- links | sitemap | probe
+  found_at INTEGER,
+  PRIMARY KEY (site_id, url)
+);
+CREATE INDEX IF NOT EXISTS cp_sec ON cat_pages(site_id, section);
+CREATE TABLE IF NOT EXISTS cat_files (
+  site_id  TEXT NOT NULL,
+  url      TEXT NOT NULL,
+  page_url TEXT,
+  section  TEXT,
+  ext      TEXT,
+  name     TEXT,
+  bytes    INTEGER,
+  found_at INTEGER,
+  PRIMARY KEY (site_id, url)
+);
+CREATE INDEX IF NOT EXISTS cf_ext ON cat_files(site_id, ext);

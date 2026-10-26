@@ -1,0 +1,283 @@
+{
+ "categories": {
+  "g": "Grammar",
+  "v": "Vocabulary / word lists",
+  "l": "Listening / audio",
+  "r": "Reading / news",
+  "w": "Writing",
+  "e": "Exams (IELTS, TOEFL...)",
+  "k": "Worksheets & lessons",
+  "t": "For teachers",
+  "o": "Other: courses, books"
+ },
+ "sites": [
+  {
+   "name": "BBC Learning English",
+   "base": "https://www.bbc.co.uk",
+   "root": "/learningenglish/english",
+   "narrow": "6-minute-english",
+   "probe": true,
+   "sitemap_hint": "learningenglish",
+   "workers": 16,
+   "delay": 0.2,
+   "id": "bbc",
+   "tags": "lrgv"
+  },
+  {
+   "name": "Perfect English Grammar",
+   "base": "https://www.perfect-english-grammar.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "peg",
+   "tags": "gk"
+  },
+  {
+   "name": "VOA Learning English",
+   "base": "https://learningenglish.voanews.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "voa",
+   "tags": "rlv"
+  },
+  {
+   "name": "British Council LearnEnglish",
+   "base": "https://learnenglish.britishcouncil.org",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "britcouncil",
+   "tags": "gvlrw"
+  },
+  {
+   "name": "Breaking News English",
+   "base": "https://breakingnewsenglish.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "bne",
+   "tags": "rlk"
+  },
+  {
+   "name": "Lingua.com (English)",
+   "base": "https://lingua.com",
+   "root": "/english",
+   "seeds": [
+    "/english/"
+   ],
+   "id": "lingua",
+   "tags": "kgvrl"
+  },
+  {
+   "name": "TeachingEnglish (BC)",
+   "base": "https://www.teachingenglish.org.uk",
+   "root": "",
+   "seeds": [
+    "/",
+    "/teaching-resources"
+   ],
+   "id": "teachingenglish",
+   "tags": "tk"
+  },
+  {
+   "name": "Elllo (listening)",
+   "base": "https://elllo.org",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "elllo",
+   "tags": "lv"
+  },
+  {
+   "name": "BusyTeacher worksheets",
+   "base": "https://busyteacher.org",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "busyteacher",
+   "tags": "kgt"
+  },
+  {
+   "name": "Oxford word lists",
+   "base": "https://www.oxfordlearnersdictionaries.com",
+   "root": "",
+   "only": [
+    "/wordlists",
+    "/wordlist",
+    "/about/wordlists"
+   ],
+   "seeds": [
+    "/wordlists",
+    "/about/wordlists/"
+   ],
+   "id": "oxford",
+   "tags": "v"
+  },
+  {
+   "name": "EnglishClub",
+   "base": "https://www.englishclub.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "englishclub",
+   "tags": "gvo"
+  },
+  {
+   "name": "UsingEnglish",
+   "base": "https://www.usingenglish.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "usingenglish",
+   "tags": "gk"
+  },
+  {
+   "name": "English Page",
+   "base": "https://www.englishpage.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "englishpage",
+   "tags": "g"
+  },
+  {
+   "name": "Cambridge Grammar",
+   "base": "https://dictionary.cambridge.org",
+   "root": "/grammar",
+   "seeds": [
+    "/grammar/"
+   ],
+   "id": "camgrammar",
+   "tags": "g"
+  },
+  {
+   "name": "Purdue OWL (writing)",
+   "base": "https://owl.purdue.edu",
+   "root": "/owl",
+   "seeds": [
+    "/owl/"
+   ],
+   "id": "purdueowl",
+   "tags": "wg"
+  },
+  {
+   "name": "UNC Writing Center",
+   "base": "https://writingcenter.unc.edu",
+   "root": "/tips-and-tools",
+   "seeds": [
+    "/tips-and-tools/"
+   ],
+   "id": "uncwriting",
+   "tags": "w"
+  },
+  {
+   "name": "ESL Lab (listening)",
+   "base": "https://www.esl-lab.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "esllab",
+   "tags": "l"
+  },
+  {
+   "name": "News in Levels",
+   "base": "https://www.newsinlevels.com",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "newsinlevels",
+   "tags": "rl"
+  },
+  {
+   "name": "OpenLearn (Open Univ.)",
+   "base": "https://www.open.edu",
+   "root": "/openlearn",
+   "seeds": [
+    "/openlearn/"
+   ],
+   "id": "openlearn",
+   "tags": "o"
+  },
+  {
+   "name": "IELTS (British Council)",
+   "base": "https://takeielts.britishcouncil.org",
+   "root": "",
+   "seeds": [
+    "/"
+   ],
+   "id": "ielts",
+   "tags": "e"
+  },
+  {
+   "name": "Cambridge English exams",
+   "base": "https://www.cambridgeenglish.org",
+   "root": "",
+   "only": [
+    "/exams-and-tests"
+   ],
+   "seeds": [
+    "/exams-and-tests/"
+   ],
+   "id": "camexams",
+   "tags": "e"
+  },
+  {
+   "name": "TOEFL (ETS)",
+   "base": "https://www.ets.org",
+   "root": "/toefl",
+   "seeds": [
+    "/toefl/"
+   ],
+   "id": "toefl",
+   "tags": "e"
+  },
+  {
+   "name": "IELTS.org (official)",
+   "base": "https://www.ielts.org",
+   "root": "/for-test-takers",
+   "seeds": [
+    "/for-test-takers",
+    "/for-test-takers/sample-test-questions"
+   ],
+   "id": "ielts_org",
+   "tags": "e"
+  },
+  {
+   "name": "Wikibooks (English books)",
+   "base": "https://en.wikibooks.org",
+   "root": "/wiki",
+   "only": [
+    "/wiki/English_in_Use",
+    "/wiki/English_Grammar",
+    "/wiki/English_as_an_Additional_Language",
+    "/wiki/English_for_B2_Students",
+    "/wiki/English_for_beginners",
+    "/wiki/Cambridge_English:_First",
+    "/wiki/Business_English"
+   ],
+   "seeds": [
+    "/wiki/English_in_Use",
+    "/wiki/English_Grammar",
+    "/wiki/English_as_an_Additional_Language",
+    "/wiki/English_for_B2_Students",
+    "/wiki/English_for_beginners",
+    "/wiki/Cambridge_English:_First",
+    "/wiki/Business_English"
+   ],
+   "id": "wikibooks_en",
+   "tags": "go"
+  }
+ ]
+}

@@ -75,6 +75,69 @@ const COMMANDS: Record<string, { help: string; run: (c: Ctx) => Promise<string> 
         : "No topics yet.";
     },
   },
+  // ---- catalog written by scripts/scan.py (tables cat_sites, cat_pages, cat_files)
+  catalog: {
+    help: "scanned sites: pages, files, file types",
+    run: async ({ env }) => {
+      const rows = await all(env, `SELECT site_id, name, status, pages, files, last_scan FROM cat_sites ORDER BY name`);
+      if (!rows.length) return "Nothing scanned yet. Run the scan workflow first.";
+      const types = await all(env, `SELECT site_id, ext, COUNT(*) n FROM cat_files GROUP BY site_id, ext ORDER BY n DESC`);
+      const by: Record<string, string[]> = {};
+      for (const t of types) (by[t.site_id] ||= []).length < 4 && by[t.site_id].push(`${t.ext} ${t.n}`);
+      return `<b>${rows.reduce((a, r) => a + r.pages, 0)} pages · ${rows.reduce((a, r) => a + r.files, 0)} files</b>\n\n` + rows.map((r) =>
+        `<b>${esc(r.name)}</b> (<code>${esc(r.site_id)}</code>)${r.status === "partial" ? " ⏳" : ""}\n  ${r.pages} pages · ${r.files} files` +
+        (by[r.site_id]?.length ? ` (${esc(by[r.site_id].join(", "))})` : "")).join("\n\n");
+    },
+  },
+  sections: {
+    help: "sections of a site, e.g. /sections bbc",
+    run: async ({ env, args }) => {
+      if (!args[0]) return "Usage: /sections <site id>  (ids: /catalog)";
+      const rows = await all(env,
+        `SELECT p.section, COUNT(*) pages, (SELECT COUNT(*) FROM cat_files f WHERE f.site_id = p.site_id AND f.section = p.section) files
+         FROM cat_pages p WHERE p.site_id=? GROUP BY p.section ORDER BY pages DESC LIMIT 40`, args[0].toLowerCase());
+      return rows.length ? rows.map((r) => `• <code>${esc(r.section)}</code> — ${r.pages} pages · ${r.files} files`).join("\n") : "Nothing found.";
+    },
+  },
+  search: {
+    help: "search pages, e.g. /search present perfect  or  /search bbc gold",
+    run: async ({ env, args }) => {
+      if (!args.length) return "Usage: /search [site] <words>";
+      const ids = (await all(env, `SELECT site_id FROM cat_sites`)).map((r) => r.site_id);
+      const site = ids.includes(args[0].toLowerCase()) ? args[0].toLowerCase() : "";
+      const words = (site ? args.slice(1) : args).slice(0, 6);
+      if (!words.length) return "Usage: /search [site] <words>";
+      const hay = `(COALESCE(title,'') || ' ' || COALESCE(descr,'') || ' ' || COALESCE(body,''))`;
+      const rows = await all(env,
+        `SELECT site_id, url, title FROM cat_pages WHERE ${words.map(() => `${hay} LIKE ?`).join(" AND ")}${site ? " AND site_id=?" : ""}
+         ORDER BY (title LIKE ?) DESC, LENGTH(url) LIMIT 15`,
+        ...words.map((w) => `%${w}%`), ...(site ? [site] : []), `%${words[0]}%`);
+      return rows.length ? rows.map((r) => `• <code>${esc(r.site_id)}</code> <a href="${esc(r.url)}">${esc(r.title || r.url)}</a>`).join("\n") : "Nothing found.";
+    },
+  },
+  files: {
+    help: "files, e.g. /files bbc pdf 10  or  /files mp3 grammar",
+    run: async ({ env, args }) => {
+      const ids = (await all(env, `SELECT site_id FROM cat_sites`)).map((r) => r.site_id);
+      const exts = (await all(env, `SELECT DISTINCT ext FROM cat_files`)).map((r) => r.ext);
+      let site = "", ext = "", n = 10;
+      const words: string[] = [];
+      for (const a of args) {
+        const l = a.toLowerCase();
+        if (!site && ids.includes(l)) site = l;
+        else if (!ext && exts.includes(l.replace(/^\./, ""))) ext = l.replace(/^\./, "");
+        else if (!isNaN(Number(a))) n = num(a, 10, 30);
+        else words.push(a);
+      }
+      const cond = ["1=1"], p: unknown[] = [];
+      if (site) { cond.push("site_id=?"); p.push(site); }
+      if (ext) { cond.push("ext=?"); p.push(ext); }
+      for (const w of words.slice(0, 5)) { cond.push("(name LIKE ? OR url LIKE ?)"); p.push(`%${w}%`, `%${w}%`); }
+      const rows = await all(env, `SELECT site_id, url, name, bytes, ext FROM cat_files WHERE ${cond.join(" AND ")} ORDER BY found_at DESC, url LIMIT ?`, ...p, n);
+      const size = (b: number) => (b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : b > 1024 ? Math.round(b / 1024) + " KB" : "");
+      return rows.length ? rows.map((r) => `• <code>${esc(r.site_id)}</code> <a href="${esc(r.url)}">${esc(r.name || r.url)}</a> ${size(r.bytes)}`.trim()).join("\n") : "Nothing found.";
+    },
+  },
 };
 
 const BASE_HELP: [string, string][] = [["start", "show this list"], ["help", "show this list"]];
