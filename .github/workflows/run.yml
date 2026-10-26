@@ -32,5 +32,5 @@ jobs:
         if: always()
         run: |
           git config user.name "langfeed"; git config user.email "langfeed@users.noreply.github.com"
-          git add state/*.json
+          mkdir -p state; git add -A state
           git diff --cached --quiet || (git commit -m "state" && git pull --rebase -q && git push)

@@ -23,6 +23,13 @@ async def with_flood_wait(make, tries: int = 5):
             await asyncio.sleep(exc.seconds + 1)
 
 
+def chat_id(raw: str) -> int:
+    """Supergroup (forum) ids look like -100xxxxxxxxxx. A positive number gets the -100 prefix; a negative one is kept as is.
+    A negative id WITHOUT -100 (e.g. -50xxxxxxxx) is an old basic group: it has no Topics (see README)."""
+    v = int(str(raw).strip())
+    return int("-100" + str(v)) if v > 0 else v
+
+
 class Tg:
     def __init__(self) -> None:
         self.client = None
@@ -35,7 +42,20 @@ class Tg:
         await self.client.connect()
         if not await self.client.is_user_authorized():
             raise SystemExit("TG_SESSION is not authorized: run scripts/make_session.py again")
-        self.chat = await self.client.get_entity(int(os.environ["TG_CHAT_ID"]))
+        cid = chat_id(os.environ["TG_CHAT_ID"])
+        if cid < 0 and not str(cid).startswith("-100"):
+            raise SystemExit(f"TG_CHAT_ID {cid} is a basic group, not a supergroup with Topics. Turn Topics on, then use the new -100... id.")
+        try:
+            self.chat = await self.client.get_entity(cid)
+        except ValueError:
+            # A fresh bot session has no cached access_hash and bots cannot list dialogs.
+            # Ask Telegram directly for the channel (hash 0 is accepted for chats the bot is a member of). # VERIFY
+            from telethon import functions, types, utils
+            channel_id, _ = utils.resolve_id(cid)
+            r = await self.client(functions.channels.GetChannelsRequest([types.InputChannel(channel_id, 0)]))
+            if not r.chats:
+                raise SystemExit(f"Bot cannot see chat {cid}: add the bot to the group as admin, then retry")
+            self.chat = r.chats[0]
 
     async def close(self) -> None:
         if self.client:
