@@ -36,7 +36,9 @@ jobs:
           TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           SECRET: ${{ secrets.WEBHOOK_SECRET }}
           URL: ${{ steps.deploy.outputs.deployment-url }}
+        shell: bash
         run: |
+          exec > >(tee -a deploy.log) 2>&1
           echo "worker url: $URL"
           curl -sS "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL" --data-urlencode "secret_token=$SECRET" --data-urlencode 'allowed_updates=["message"]'
           echo
@@ -44,3 +46,9 @@ jobs:
           echo
           curl -sS "https://api.telegram.org/bot$TOKEN/setChatMenuButton" --data-urlencode 'menu_button={"type":"commands"}'
           echo
+      - name: Summary
+        if: always()
+        shell: bash
+        env: {JOB_STATUS: "${{ job.status }}"}
+        run: |
+          python3 scripts/summary.py deploy deploy.log "deploy-worker: Cloudflare Worker + Telegram webhook" >> "$GITHUB_STEP_SUMMARY"

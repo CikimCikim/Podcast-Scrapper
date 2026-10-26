@@ -94,6 +94,11 @@ jobs:
               out.append("_extra")
           print("matrix=" + json.dumps(out))
           PY
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## Scan plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "Sites: \`${{ steps.m.outputs.matrix }}\`  (empty list = nothing to scan)" >> "$GITHUB_STEP_SUMMARY"
   scan:
     needs: plan
     if: needs.plan.outputs.matrix != '[]'
@@ -128,7 +133,9 @@ jobs:
           FRESH: ${{ inputs.fresh && '1' || '' }}
           TYPES: ${{ inputs.types }}
           MEASURE: ${{ inputs.measure }}
+        shell: bash
         run: |
+          exec > >(tee -a scan.log) 2>&1
           args=()
           [ -n "$FRESH" ] && args+=(--fresh)
           [ "$MEASURE" = "false" ] && args+=(--no-measure)
@@ -148,6 +155,12 @@ jobs:
             args+=(--sites "$SITE")
           fi
           python scripts/scan.py "${args[@]}"
+      - name: Summary
+        if: always()
+        shell: bash
+        env: {JOB_STATUS: "${{ job.status }}"}
+        run: |
+          python3 scripts/summary.py scan scan.log "scan: ${{ matrix.site }}" >> "$GITHUB_STEP_SUMMARY"
       - name: Save progress
         if: always()
         uses: actions/cache/save@v4
