@@ -19,7 +19,11 @@ from urllib.robotparser import RobotFileParser
 import requests
 from requests.adapters import HTTPAdapter
 
-UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"}
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.5"}
+BLOCKED = (401, 403, 451)                                # "go away" answers: a failure, not a missing page
+BLOCK_STOP = 10                                          # give up on a site that only ever answers BLOCKED
 EXTS = (".pdf", ".mp3", ".m4a", ".wav", ".ogg", ".aac", ".mp4", ".webm", ".mov", ".doc", ".docx", ".rtf", ".txt",
         ".epub", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".srt", ".vtt")
 PAGE_EXTS = (".html", ".shtml", ".htm", ".php")
@@ -111,6 +115,7 @@ class Net:
         ad = HTTPAdapter(pool_connections=16, pool_maxsize=32)
         self.s.mount("https://", ad)
         self.s.mount("http://", ad)
+        self.codes: Counter = Counter()                  # HTTP status -> how many page requests got it (0 = no answer)
 
     def request(self, method: str, url: str, timeout: int = 30, retries: int = 4, headers: dict | None = None, stream: bool = False):
         """Response, or None if every attempt failed. Waits and retries on 'slow down'."""
@@ -119,6 +124,11 @@ class Net:
                 r = self.s.request(method, url, timeout=timeout, allow_redirects=True, headers=headers, stream=stream)
             except requests.RequestException:
                 SLEEP(1.5 * (attempt + 1))
+                continue
+            if r.status_code == 403 and attempt < 2 and method == "GET":
+                r.close()                                # often a one-off bot check: retry with a Referer, slowly
+                headers = {**(headers or {}), "Referer": urlparse(url)._replace(path="/", query="").geturl()}
+                SLEEP(2 * (attempt + 1))
                 continue
             if r.status_code in (429, 500, 502, 503, 504):
                 ra = str(r.headers.get("Retry-After", ""))
@@ -133,7 +143,12 @@ class Net:
         """HTML text; '' if missing / not HTML; None if the request failed."""
         r = self.request("GET", url)
         if r is None:
+            self.codes[0] += 1
             return None
+        self.codes[r.status_code] += 1
+        if r.status_code in BLOCKED:
+            r.close()
+            return None                                  # blocked: report it as failed instead of "page missing"
         if r.status_code != 200:
             return ""
         ct = r.headers.get("Content-Type", "").lower()
@@ -237,6 +252,7 @@ class Scanner:
         self.robots = None
         self.max_pages = site.get("max_pages", MAX_PAGES)
         self.st: dict = {}
+        self.refused = False
         self.known_pages: set = set()
         self.known_files: set = set()
 
@@ -349,6 +365,11 @@ class Scanner:
             while queue and len(pages) < self.max_pages and not self.out_of_time():
                 batch = [queue.popleft() for _ in range(min(self.workers * 3, len(queue)))]
                 htmls = list(ex.map(self.net.page, batch))
+                if not pages and sum(self.net.codes[c] for c in BLOCKED) + self.net.codes[0] >= BLOCK_STOP:
+                    st["failed"].extend(u for u, h in zip(batch, htmls) if h is None)
+                    self.refused = True
+                    log(f"[{self.id}] site refuses us (HTTP {dict(self.net.codes)}) - stopping early, nothing fetched")
+                    break
                 for url, html in zip(batch, htmls):
                     if html is None:
                         st["failed"].append(url)
@@ -577,12 +598,17 @@ class Scanner:
             self.save_state()
         if not self.st["queue"] and not self.site.get("ia"):
             self.reassign_owners()
-        if not self.st["queue"]:
-            self.st["done_at"] = int(time.time())
+        empty = not self.site.get("ia") and not self.st["pages"] and (not self.st["queue"] or self.refused)
+        if not self.st["queue"] and not empty:
+            self.st["done_at"] = int(time.time())          # an empty scan must be retried, never "up to date"
         self.save_state()
-        status = "complete" if not self.st["queue"] else "partial"
+        status = "blocked" if empty else "complete" if not self.st["queue"] else "partial"
         self.db.site_row(self.site, status)
         log(f"[{self.id}] {status}: {len(self.st['pages'])} pages, {len(self.st['queue'])} queued, {len(self.st['failed'])} failed")
+        if empty:
+            codes = ", ".join(f"{c or 'no answer'}: {n}" for c, n in sorted(self.net.codes.items())) or "no requests made"
+            log(f"[{self.id}] WARNING: fetched 0 pages (HTTP answers - {codes}). The site probably blocks bots "
+                f"(403 / challenge page) or the seeds are wrong. Will be retried on the next run.")
         return status
 
 

@@ -85,7 +85,7 @@ const COMMANDS: Record<string, { help: string; run: (c: Ctx) => Promise<string> 
       const by: Record<string, string[]> = {};
       for (const t of types) (by[t.site_id] ||= []).length < 4 && by[t.site_id].push(`${t.ext} ${t.n}`);
       return `<b>${rows.reduce((a, r) => a + r.pages, 0)} pages · ${rows.reduce((a, r) => a + r.files, 0)} files</b>\n\n` + rows.map((r) =>
-        `<b>${esc(r.name)}</b> (<code>${esc(r.site_id)}</code>)${r.status === "partial" ? " ⏳" : ""}\n  ${r.pages} pages · ${r.files} files` +
+        `<b>${esc(r.name)}</b> (<code>${esc(r.site_id)}</code>)${r.status === "partial" ? " ⏳" : r.status === "blocked" ? " 🚫" : ""}\n  ${r.pages} pages · ${r.files} files` +
         (by[r.site_id]?.length ? ` (${esc(by[r.site_id].join(", "))})` : "")).join("\n\n");
     },
   },

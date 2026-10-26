@@ -53,7 +53,10 @@ def main() -> int:
             print(f"[{s['id']}] skipped: time budget used up (next run continues)")
             continue
         try:
-            Scanner(s, net, db, a.state_dir, deadline, measure=not a.no_measure, rescan_days=a.rescan_days, fresh=a.fresh, exts=exts).run()
+            res = Scanner(s, net, db, a.state_dir, deadline, measure=not a.no_measure, rescan_days=a.rescan_days, fresh=a.fresh, exts=exts).run()
+            if res == "blocked":                      # 0 pages: make the job red / annotated instead of a silent green
+                failed += 1
+                print(f"::warning::[{s['id']}] scanned 0 pages - site blocks the bot or seeds are wrong", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001  one broken site must not stop the others
             failed += 1
             print(f"[{s['id']}] FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

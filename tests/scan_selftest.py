@@ -142,4 +142,19 @@ with tempfile.TemporaryDirectory() as tmp5:
     except RuntimeError as e:
         assert "401" in str(e)
     assert os.path.exists(os.path.join(tmp5, "t.json.gz"))
+# a site that answers 403 to everything: must NOT end up "complete" / "up to date"
+class Deny(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self): self.send_response(403); self.send_header("Content-Length", "0"); self.end_headers()
+    do_HEAD = do_GET
+dsrv = HTTPServer(("127.0.0.1", 0), Deny)
+threading.Thread(target=dsrv.serve_forever, daemon=True).start()
+dsite = {**site, "id": "d", "base": f"http://127.0.0.1:{dsrv.server_port}"}
+db.poster = inner
+with tempfile.TemporaryDirectory() as tmp6:
+    sc = Scanner(dsite, Net(), db, tmp6, time.monotonic() + 60)
+    assert sc.run() == "blocked"
+    assert sc.st["done_at"] == 0 and sc.st["failed"], sc.st
+    assert con.execute("select status from cat_sites where site_id='d'").fetchone()["status"] == "blocked"
+    assert Scanner(dsite, Net(), db, tmp6, time.monotonic() + 60).run() == "blocked"   # retried, not "up to date"
 print("scan selftest OK")

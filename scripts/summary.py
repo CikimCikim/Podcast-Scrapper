@@ -75,12 +75,13 @@ def scan(ls: list[str], title: str) -> str:
             r = rows.setdefault(m.group(1), {"p": 0, "f": 0, "s": "", "d": ""})
             r["p"] += int(m.group(2))
             r["f"] += int(m.group(3))
-        m = re.match(r"\[(\w+)\] (complete|partial): (.*)", l)
+        m = re.match(r"\[(\w+)\] (complete|partial|blocked): (.*)", l)
         if m:
             r = rows.setdefault(m.group(1), {"p": 0, "f": 0, "s": "", "d": ""})
-            r["s"] = "✅ complete" if m.group(2) == "complete" else "⏳ partial (continues next run)"
+            r["s"] = {"complete": "✅ complete", "partial": "⏳ partial (continues next run)",
+                      "blocked": "🚫 0 pages - site blocks the bot? (retried next run)"}[m.group(2)]
             r["d"] = m.group(3)
-        m = re.match(r"\[(\w+)\] (up to date.*|FAILED.*|robots.*|skipped.*)", l)
+        m = re.match(r"\[(\w+)\] (up to date.*|FAILED.*|robots.*|skipped.*|WARNING.*|site refuses.*)", l)
         if m:
             r = rows.setdefault(m.group(1), {"p": 0, "f": 0, "s": "", "d": ""})
             r["s"] = "❌ " + m.group(2)[:100] if m.group(2).startswith("FAILED") else m.group(2)[:100]

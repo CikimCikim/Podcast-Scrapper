@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS cat_sites (
   name      TEXT,
   base      TEXT,
   tags      TEXT,
-  status    TEXT,                    -- complete | partial
+  status    TEXT,                    -- complete | partial | blocked
   last_scan INTEGER,
   pages     INTEGER,
   files     INTEGER
