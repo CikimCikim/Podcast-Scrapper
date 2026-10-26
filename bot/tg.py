@@ -62,15 +62,19 @@ class Tg:
             await self.client.disconnect()
 
     async def create_topic(self, title: str) -> int:
-        """Needs: group with Topics ON, bot is admin with 'Manage Topics'. Returns message_thread_id."""
-        from telethon import functions, types
-        import random
-        res = await with_flood_wait(lambda: self.client(functions.channels.CreateForumTopicRequest(
-            channel=self.chat, title=title[:128], random_id=random.randrange(1, 2**31))))
-        for u in getattr(res, "updates", []):
-            if isinstance(u, types.UpdateNewChannelMessage):
-                return int(u.message.id)
-        raise RuntimeError("topic created but its id was not found in the reply")
+        """Telethon 1.45 has no CreateForumTopicRequest, so the Bot API is used for this one call.
+        Needs TG_BOT_TOKEN (same bot as the session), Topics ON and the bot an admin with 'Manage Topics'."""
+        import httpx
+        token = os.environ.get("TG_BOT_TOKEN")
+        if not token:
+            raise SystemExit("TG_BOT_TOKEN secret is missing (needed once to create topics), or set topic_id in feeds.json")
+        async with httpx.AsyncClient(timeout=30) as http:
+            r = await with_flood_wait(lambda: http.post(f"https://api.telegram.org/bot{token}/createForumTopic",
+                                                        json={"chat_id": chat_id(os.environ["TG_CHAT_ID"]), "name": title[:128]}))
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"createForumTopic failed: {data.get('description')}")
+        return int(data["result"]["message_thread_id"])
 
     async def send_media(self, topic_id: int, path: Path, *, kind: str, caption: str, title: str = "",
                          performer: str = "", duration: int = 0, mime: str = "") -> int:

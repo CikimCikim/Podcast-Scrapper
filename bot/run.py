@@ -77,7 +77,7 @@ async def run_site(tg, site: dict, defaults: dict, seen_all: dict, topics: dict,
     if not send:
         return
     if sid not in topics:
-        topics[sid] = await tg.create_topic(site["topic"])
+        topics[sid] = site.get("topic_id") or await tg.create_topic(site["topic"])
         print(f"[{sid}] topic created id={topics[sid]}")
     q: asyncio.Queue = asyncio.Queue(maxsize=PREFETCH)
     dest_dir = WORK / sid
