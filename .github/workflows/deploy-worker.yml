@@ -1,0 +1,44 @@
+name: deploy-worker
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", ".github/workflows/deploy-worker.yml"]
+  workflow_dispatch: {}
+permissions: {contents: read}
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill wrangler.toml
+        env:
+          D1: ${{ secrets.CF_D1_ID }}
+          CHAT: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          sed -i "s/__D1_ID__/$D1/; s/__CHAT_ID__/$CHAT/" worker/wrangler.toml
+      - name: Deploy
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: worker
+          secrets: |
+            TG_BOT_TOKEN
+            WEBHOOK_SECRET
+            ALLOWED_IDS
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          ALLOWED_IDS: ${{ secrets.ALLOWED_IDS }}
+      - name: Point Telegram at the Worker + command menu
+        env:
+          TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          echo "worker url: $URL"
+          curl -sS "https://api.telegram.org/bot$TOKEN/setWebhook" --data-urlencode "url=$URL" --data-urlencode "secret_token=$SECRET" --data-urlencode 'allowed_updates=["message"]'
+          echo
+          curl -sS "https://api.telegram.org/bot$TOKEN/setMyCommands" --data-urlencode 'commands=[{"command":"start","description":"show all commands"},{"command":"help","description":"show all commands"},{"command":"stats","description":"episodes per site"},{"command":"list","description":"latest episodes"},{"command":"find","description":"search titles"},{"command":"sites","description":"sites and topics"}]'
+          echo

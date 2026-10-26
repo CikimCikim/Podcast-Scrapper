@@ -9,7 +9,9 @@
       "topic": "BBC Learning English",
       "feed": "https://podcasts.files.bbci.co.uk/p02pc9tn.rss",
       "performer": "BBC Learning English",
-      "_note": "6 Minute English: verified 346 entries with audio."
+      "_note": "6 Minute English: verified 346 entries with audio.",
+      "extras": true,
+      "page_template": "https://www.bbc.co.uk/learningenglish/english/features/6-minute-english_{yyyy}/ep-{yymmdd}"
     },
     {
       "id": "voa",

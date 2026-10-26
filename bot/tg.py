@@ -77,7 +77,7 @@ class Tg:
         return int(data["result"]["message_thread_id"])
 
     async def send_media(self, topic_id: int, path: Path, *, kind: str, caption: str, title: str = "",
-                         performer: str = "", duration: int = 0, mime: str = "") -> int:
+                         performer: str = "", duration: int = 0, mime: str = "") -> tuple[int, int]:
         """kind audio -> shown in Telegram's music player, plays while still loading (not 'document').
         kind video -> supports_streaming=True (plays before full download)."""
         from telethon.tl import types
@@ -91,6 +91,12 @@ class Tg:
         else:
             kw = dict(force_document=True)
         msg = await with_flood_wait(lambda: self.client.send_file(
-            self.chat, str(path), caption=caption[:1024], reply_to=topic_id, attributes=attrs or None,
+            self.chat, str(path), caption=caption, parse_mode="html", reply_to=topic_id, attributes=attrs or None,
             part_size_kb=512, **kw))
-        return int(msg.id)
+        return int(msg.id), int(getattr(getattr(msg, "document", None), "id", 0) or 0)
+
+    async def send_documents(self, topic_id: int, paths: list[Path], caption: str = "") -> list[int]:
+        """Extra files (PDF ...) right after the audio, in the same topic, as one album (documents can be grouped, audio+PDF cannot)."""
+        msgs = await with_flood_wait(lambda: self.client.send_file(
+            self.chat, [str(p) for p in paths], caption=caption, parse_mode="html", reply_to=topic_id, force_document=True))
+        return [int(m.id) for m in (msgs if isinstance(msgs, list) else [msgs])]

@@ -1,0 +1,12 @@
+# worker/wrangler.toml - the two __PLACEHOLDERS__ are filled from GitHub Secrets by the deploy workflow
+name = "langfeed-bot"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+CHAT_ID = "__CHAT_ID__"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "langfeed"
+database_id = "__D1_ID__"
