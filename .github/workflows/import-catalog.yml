@@ -47,3 +47,5 @@ jobs:
             sleep $((RANDOM % 10 + 3))
           done
           echo "::error::could not push"; exit 1
+      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
+        if: always()
