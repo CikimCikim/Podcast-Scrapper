@@ -1,0 +1,10 @@
+{
+ "site_id": "oxford",
+ "name": "Oxford word lists",
+ "base": "https://www.oxfordlearnersdictionaries.com",
+ "tags": "v",
+ "status": "complete",
+ "last_scan": 1793081178,
+ "pages": 7,
+ "files": 15
+}
