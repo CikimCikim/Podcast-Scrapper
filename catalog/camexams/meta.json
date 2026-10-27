@@ -1,0 +1,10 @@
+{
+ "site_id": "camexams",
+ "name": "Cambridge English exams",
+ "base": "https://www.cambridgeenglish.org",
+ "tags": "e",
+ "status": "complete",
+ "last_scan": 1793080495,
+ "pages": 143,
+ "files": 400
+}
