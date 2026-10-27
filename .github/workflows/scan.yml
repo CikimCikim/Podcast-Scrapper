@@ -120,8 +120,6 @@ jobs:
         run: |
           echo "## Scan plan" >> "$GITHUB_STEP_SUMMARY"
           echo "Sites: \`${{ steps.m.outputs.matrix }}\`  (empty list = nothing to scan)" >> "$GITHUB_STEP_SUMMARY"
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()
   scan:
     needs: plan
     if: needs.plan.outputs.matrix != '[]'
@@ -136,7 +134,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install requests
+      - run: |
+          pip install requests
+          pip install curl_cffi || echo "curl_cffi not installed (optional)"
       - name: Restore progress
         uses: actions/cache/restore@v4
         with:
@@ -190,35 +190,34 @@ jobs:
           fi
           python scripts/scan.py "${args[@]}"
       - name: Commit catalog
+        id: push
         if: always()
         shell: bash
         run: |
-          git config user.name "scan-bot"
-          git config user.email "scan-bot@users.noreply.github.com"
-          git add -A catalog
-          if git diff --cached --quiet; then echo "nothing new to commit"; exit 0; fi
-          git commit -q -m "catalog: ${{ matrix.site }}"
-          for i in 1 2 3 4 5 6; do                  # four jobs push at the same time: fetch, rebase, retry
-            git fetch -q origin "${{ github.ref_name }}" && git rebase -q "origin/${{ github.ref_name }}" \
-              && git push -q origin "HEAD:${{ github.ref_name }}" && exit 0
-            git rebase --abort 2>/dev/null || true
-            sleep $((RANDOM % 15 + 5))
-          done
-          echo "::error::could not push the catalog"; exit 1
+          bash scripts/push_catalog.sh "catalog: ${{ matrix.site }}" "${{ github.ref_name }}"
       - name: Summary
         if: always()
         shell: bash
-        env: {JOB_STATUS: "${{ job.status }}"}
+        env:
+          JOB_STATUS: ${{ job.status }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          SUMMARY_JSON: result.json
         run: |
           python3 scripts/summary.py scan scan.log "scan: ${{ matrix.site }}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Save progress
+      - name: Keep result for the overview
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-result-${{ matrix.site }}
+          path: result.json
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Save progress
+        if: always() && steps.push.outcome != 'failure'     # never remember "done" for rows that did not reach git
         uses: actions/cache/save@v4
         with:
           path: scan_state
           key: scan-${{ matrix.site }}-${{ github.run_id }}
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()
   index:
     needs: [plan, scan]
     if: always() && needs.plan.outputs.matrix != '[]'
@@ -230,17 +229,25 @@ jobs:
       - name: Commit index
         shell: bash
         run: |
-          git config user.name "scan-bot"
-          git config user.email "scan-bot@users.noreply.github.com"
-          git add -A catalog
-          if git diff --cached --quiet; then echo "index unchanged"; exit 0; fi
-          git commit -q -m "catalog: index"
-          for i in 1 2 3 4 5 6; do
-            git fetch -q origin "${{ github.ref_name }}" && git rebase -q "origin/${{ github.ref_name }}" \
-              && git push -q origin "HEAD:${{ github.ref_name }}" && exit 0
-            git rebase --abort 2>/dev/null || true
-            sleep $((RANDOM % 15 + 5))
-          done
-          echo "::error::could not push the index"; exit 1
-      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
-        if: always()
+          bash scripts/push_catalog.sh "catalog: index" "${{ github.ref_name }}"
+  overview:
+    needs: [plan, scan]
+    if: always() && needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scan-result-*
+          merge-multiple: false
+          path: results
+        continue-on-error: true
+      - name: Overview
+        shell: bash
+        env:
+          PLAN: ${{ needs.plan.outputs.matrix }}
+          JOB_STATUS: ${{ needs.scan.result }}
+        run: |
+          mkdir -p all
+          for f in results/*/result.json; do [ -f "$f" ] && cp "$f" "all/$(basename "$(dirname "$f")").json"; done
+          python3 scripts/summary.py overview all "scan: overview of the whole run" >> "$GITHUB_STEP_SUMMARY"

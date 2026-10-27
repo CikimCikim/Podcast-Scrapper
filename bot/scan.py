@@ -24,6 +24,12 @@ from requests.adapters import HTTPAdapter
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-US,en;q=0.5"}
+CHROME = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9", "Accept-Encoding": "gzip, deflate", "Upgrade-Insecure-Requests": "1",
+          "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1",
+          "Sec-Ch-Ua": '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"', "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"'}
 BLOCKED = (401, 403, 451)                                # "go away" answers: a failure, not a missing page
 CONNECT_TIMEOUT = 10                                     # seconds to wait for a connection (read timeout stays per call)
 DEAD_AFTER = 4                                           # connection failures in a row (and no success) = host unreachable
@@ -212,10 +218,59 @@ class Net:
         self.s.mount("http://", ad)
         self.fails: Counter = Counter()                  # host -> connection failures in a row
         self.codes: Counter = Counter()                  # HTTP status -> how many page requests got it (0 = no answer)
+        self.mode: dict[str, str] = {}                   # host -> "chrome" | "impersonate": what got past its bot check last time
+        self.chrome_s = None
+
+    def _second_chance(self, host: str, url: str, timeout: int):
+        """A 403 on a page: ask again like a real Chrome (full header set, cookies from the home page first), then, if the
+        optional curl_cffi package is installed, with Chrome's TLS fingerprint (many bot walls look at that, not at headers).
+        Returns a response that is not 403, or None. The mode that worked is remembered per host."""
+        home = urlparse(url)._replace(path="/", query="").geturl()
+        if self.chrome_s is None:
+            self.chrome_s = requests.Session()
+            self.chrome_s.headers.update(CHROME)
+        try:
+            self.chrome_s.get(home, timeout=(CONNECT_TIMEOUT, timeout))      # cookies / challenge tokens
+            r = self.chrome_s.get(url, timeout=(CONNECT_TIMEOUT, timeout), headers={"Referer": home, "Sec-Fetch-Site": "same-origin"})
+            if r.status_code != 403:
+                self.mode[host] = "chrome"
+                return r
+            r.close()
+        except requests.RequestException:
+            pass
+        try:
+            from curl_cffi import requests as cr          # optional: pip install curl_cffi
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            r = cr.get(url, timeout=timeout, impersonate="chrome", headers={"Referer": home}, allow_redirects=True)
+        except Exception:  # noqa: BLE001
+            return None
+        if r.status_code != 403:
+            self.mode[host] = "impersonate"
+            return r
+        return None
+
+    def _remembered(self, host: str, url: str, timeout: int):
+        """Hosts that already needed the Chrome look keep getting it, without paying for a failed first try."""
+        m = self.mode.get(host)
+        try:
+            if m == "chrome" and self.chrome_s is not None:
+                return self.chrome_s.get(url, timeout=(CONNECT_TIMEOUT, timeout))
+            if m == "impersonate":
+                from curl_cffi import requests as cr
+                return cr.get(url, timeout=timeout, impersonate="chrome", allow_redirects=True)
+        except Exception:  # noqa: BLE001
+            self.mode.pop(host, None)
+        return None
 
     def request(self, method: str, url: str, timeout: int = 30, retries: int = 4, headers: dict | None = None, stream: bool = False):
         """Response, or None if every attempt failed. Waits and retries on 'slow down'."""
         host = urlparse(url).netloc.lower()
+        if method == "GET" and not stream and host in self.mode:
+            r = self._remembered(host, url, timeout)
+            if r is not None and r.status_code != 403:
+                return r
         for attempt in range(retries):
             if self.fails[host] >= DEAD_AFTER:           # host never answers (IP blocked / down): stop wasting minutes
                 return None
@@ -227,6 +282,13 @@ class Net:
                 SLEEP(1.5 * (attempt + 1))
                 continue
             self.fails[host] = 0
+            if r.status_code == 403 and attempt == 0 and method == "GET" and not stream and host not in self.mode:
+                r.close()
+                alt = self._second_chance(host, url, timeout)
+                if alt is not None:
+                    return alt
+                SLEEP(1)
+                continue
             if r.status_code == 403 and attempt < 2 and method == "GET":
                 r.close()                                # often a one-off bot check: retry with a Referer, slowly
                 headers = {**(headers or {}), "Referer": urlparse(url)._replace(path="/", query="").geturl()}
