@@ -1,0 +1,49 @@
+name: import catalog zip
+# Put catalog-import.zip (with a top-level catalog/ folder inside) in the repo root and push: this workflow unpacks it into
+# catalog/, commits the files and removes the zip. Safe by default: files that already exist are NOT overwritten.
+# Run it by hand with "overwrite" ticked to replace existing files with the ones from the zip.
+on:
+  push:
+    paths: ["catalog-import.zip"]
+  workflow_dispatch:
+    inputs:
+      overwrite:
+        description: "Overwrite files that already exist in catalog/"
+        type: boolean
+        default: false
+permissions: {contents: write}
+concurrency: {group: catalog-import, cancel-in-progress: false}
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack
+        shell: bash
+        env: {OVERWRITE: "${{ inputs.overwrite && '1' || '' }}"}
+        run: |
+          set -euo pipefail
+          Z=catalog-import.zip
+          if [ ! -f "$Z" ]; then echo "::notice::$Z is not in the repo root, nothing to do"; exit 0; fi
+          bad="$(unzip -Z1 "$Z" | grep -Ev '^catalog/' || true)"
+          if [ -n "$bad" ]; then echo "::error::the zip may only contain catalog/..., found: $bad"; exit 1; fi
+          if unzip -Z1 "$Z" | grep -Eq '(^|/)\.\.(/|$)'; then echo "::error::unsafe path in the zip"; exit 1; fi
+          if [ -n "$OVERWRITE" ]; then unzip -oq "$Z"; else unzip -nq "$Z"; fi
+          git rm -q "$Z"
+          python3 scripts/build_index.py || true
+          echo "unpacked: $(find catalog -type f | wc -l) files in catalog/"
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "scan-bot"
+          git config user.email "scan-bot@users.noreply.github.com"
+          git add -A catalog
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -q -m "catalog: import zip"
+          for i in 1 2 3 4 5; do
+            git fetch -q origin "${{ github.ref_name }}" && git rebase -q "origin/${{ github.ref_name }}" \
+              && git push -q origin "HEAD:${{ github.ref_name }}" && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep $((RANDOM % 10 + 3))
+          done
+          echo "::error::could not push"; exit 1
