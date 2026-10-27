@@ -22,3 +22,5 @@ jobs:
         env: {JOB_STATUS: "${{ job.status }}"}
         run: |
           python3 scripts/summary.py generic check.log "check_feeds: feed URLs and selftests" >> "$GITHUB_STEP_SUMMARY"
+      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
+        if: always()
