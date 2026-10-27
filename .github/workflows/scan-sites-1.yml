@@ -99,6 +99,8 @@ jobs:
               sys.exit(1)
           print("sites=" + ",".join(picked))
           PY
+      - uses: 3Soroush/ghm-actions/ghm-summary-dump@c8aa2a303f21e132ea248eeb6a3678e1101a2df7
+        if: always()
   scan:
     needs: pick
     uses: ./.github/workflows/scan.yml
