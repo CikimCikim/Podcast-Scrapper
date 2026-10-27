@@ -1,0 +1,10 @@
+{
+ "site_id": "openlearn",
+ "name": "OpenLearn (Open Univ.)",
+ "base": "https://www.open.edu",
+ "tags": "o",
+ "status": "blocked",
+ "last_scan": 1793080429,
+ "pages": 0,
+ "files": 0
+}
