@@ -70,7 +70,7 @@ def run(ls: list[str], title: str) -> str:
 def scan(ls: list[str], title: str) -> str:
     rows: dict[str, dict] = {}
     for l in ls:
-        m = re.match(r"\[(\w+)\] D1 \+(\d+) pages \+(\d+) files", l)
+        m = re.match(r"\[(\w+)\] saved \+(\d+) pages \+(\d+) files", l)
         if m:
             r = rows.setdefault(m.group(1), {"p": 0, "f": 0, "s": "", "d": ""})
             r["p"] += int(m.group(2))

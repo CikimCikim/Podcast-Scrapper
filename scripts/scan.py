@@ -5,16 +5,22 @@
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from pathlib import Path
 
-from bot.scan import EXTS, D1Sync, Net, Scanner, custom_site, ia_site
+from bot.scan import EXTS, D1Sync, FileDb, Net, Scanner, custom_site, ia_site
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _on_term(signum, frame):                      # Actions cancel sends SIGINT, then SIGTERM: leave through the finally: blocks
+    raise SystemExit(143)
+
+
 def main() -> int:
+    signal.signal(signal.SIGTERM, _on_term)
     ap = argparse.ArgumentParser()
     ap.add_argument("--sites", default="", help="comma list of site ids from sites.json (empty = all)")
     ap.add_argument("--url", default="", help="extra site to scan, e.g. https://example.com/english")
@@ -26,6 +32,9 @@ def main() -> int:
     ap.add_argument("--no-measure", action="store_true", help="skip HEAD requests for file sizes")
     ap.add_argument("--fresh", action="store_true", help="ignore saved progress")
     ap.add_argument("--rescan-days", type=int, default=7)
+    ap.add_argument("--store", default="auto", choices=["auto", "files", "d1"],
+                    help="files = CSV files in --out (no limits), d1 = Cloudflare D1, auto = d1 if the CF_* env vars are set, else files")
+    ap.add_argument("--out", default=str(ROOT / "catalog"), help="folder for --store files")
     ap.add_argument("--state-dir", default=os.environ.get("SCAN_STATE_DIR", str(ROOT / "scan_state")))
     a = ap.parse_args()
 
@@ -44,7 +53,9 @@ def main() -> int:
         sites.append(ia_site(a.ia, a.ia_type, a.ia_limit))
 
     exts = tuple("." + t.strip(" .") for t in a.types.split(",") if t.strip()) or EXTS
-    db = D1Sync(os.environ["CF_ACCOUNT_ID"], os.environ["CF_D1_ID"], os.environ["CF_API_TOKEN"])
+    use_d1 = a.store == "d1" or (a.store == "auto" and all(os.environ.get(k) for k in ("CF_ACCOUNT_ID", "CF_D1_ID", "CF_API_TOKEN")))
+    db = D1Sync(os.environ["CF_ACCOUNT_ID"], os.environ["CF_D1_ID"], os.environ["CF_API_TOKEN"]) if use_d1 else FileDb(a.out)
+    print("store:", "Cloudflare D1" if use_d1 else f"CSV files in {a.out}")
     net = Net()
     deadline = time.monotonic() + a.budget_min * 60
     failed = 0
@@ -60,6 +71,7 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001  one broken site must not stop the others
             failed += 1
             print(f"[{s['id']}] FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+    db.finish()
     return 1 if sites and failed == len(sites) else 0
 
 

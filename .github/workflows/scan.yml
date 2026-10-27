@@ -3,10 +3,23 @@ name: scan
 # One job per site, 4 at a time. Progress is kept in the Actions cache, so a site that does not finish in one run continues in the next.
 on:
   schedule: [{cron: "30 3 * * 0"}]          # weekly
+  workflow_call:                            # used by scan-sites-1.yml / scan-sites-2.yml (checkbox forms)
+    inputs:
+      site: {type: string, default: "all"}
+      sites: {type: string, default: ""}
+      t_pdf: {type: boolean, default: false}
+      t_audio: {type: boolean, default: false}
+      t_video: {type: boolean, default: false}
+      t_docs: {type: boolean, default: false}
+      types_list: {type: string, default: ""}
+      measure: {type: boolean, default: true}
+      fresh: {type: boolean, default: false}
+      url: {type: string, default: ""}
+      ia: {type: string, default: ""}
   workflow_dispatch:
     inputs:
       site:
-        description: "Site to scan (pick one)"
+        description: "Site to scan (pick one; for several use the comma list below)"
         type: choice
         default: all
         options:
@@ -38,17 +51,25 @@ on:
       sites:
         description: "Several sites: comma list, e.g. bbc,peg (overrides the dropdown)"
         default: ""
-      types:
-        description: "File types to keep"
-        type: choice
-        default: all
-        options:
-          - all
-          - pdf
-          - audio
-          - pdf + audio
-          - documents
-          - video
+      t_pdf:
+        description: "Types: PDF"
+        type: boolean
+        default: false
+      t_audio:
+        description: "Types: audio (mp3, m4a, wav, ogg, aac)"
+        type: boolean
+        default: false
+      t_video:
+        description: "Types: video (mp4, webm, mov)"
+        type: boolean
+        default: false
+      t_docs:
+        description: "Types: documents (doc, docx, rtf, ppt, pptx, xls, xlsx, epub)"
+        type: boolean
+        default: false
+      types_list:
+        description: "More types (added to the ticked ones): comma list of extensions, e.g. zip,srt. Leave all types unticked and this empty = every type"
+        default: ""
       measure:
         description: "Check file sizes (slower)"
         type: boolean
@@ -63,7 +84,7 @@ on:
       ia:
         description: "Internet Archive search words"
         default: ""
-permissions: {contents: read}
+permissions: {contents: write}       # the scan commits its CSV files to catalog/
 jobs:
   plan:
     runs-on: ubuntu-24.04
@@ -131,7 +152,11 @@ jobs:
           URL: ${{ inputs.url }}
           IA: ${{ inputs.ia }}
           FRESH: ${{ inputs.fresh && '1' || '' }}
-          TYPES: ${{ inputs.types }}
+          T_PDF: ${{ inputs.t_pdf }}
+          T_AUDIO: ${{ inputs.t_audio }}
+          T_VIDEO: ${{ inputs.t_video }}
+          T_DOCS: ${{ inputs.t_docs }}
+          TYPES_LIST: ${{ inputs.types_list }}
           MEASURE: ${{ inputs.measure }}
         shell: bash
         run: |
@@ -139,14 +164,21 @@ jobs:
           args=()
           [ -n "$FRESH" ] && args+=(--fresh)
           [ "$MEASURE" = "false" ] && args+=(--no-measure)
-          case "$TYPES" in
-            pdf) t=pdf;;
-            audio) t=mp3,m4a,wav,ogg,aac;;
-            "pdf + audio") t=pdf,mp3,m4a,wav,ogg,aac;;
-            documents) t=pdf,doc,docx,rtf,ppt,pptx,xls,xlsx,epub;;
-            video) t=mp4,webm,mov;;
-            *) t="";;
-          esac
+          t=""                                       # ticked boxes + the extra list; nothing at all = every type
+          if [ "$T_PDF" = "true" ]; then t="$t,pdf"; fi
+          if [ "$T_AUDIO" = "true" ]; then t="$t,mp3,m4a,wav,ogg,aac"; fi
+          if [ "$T_VIDEO" = "true" ]; then t="$t,mp4,webm,mov"; fi
+          if [ "$T_DOCS" = "true" ]; then t="$t,pdf,doc,docx,rtf,ppt,pptx,xls,xlsx,epub"; fi
+          if [ -n "$TYPES_LIST" ]; then
+            IFS=',' read -ra parts <<< "$TYPES_LIST"
+            for p in "${parts[@]}"; do
+              p="$(echo "$p" | tr 'A-Z' 'a-z' | tr -d ' .')"
+              if [ "$p" = "all" ]; then t=""; break; fi
+              if [ -n "$p" ]; then t="$t,$p"; fi
+            done
+          fi
+          t="$(echo "${t#,}" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          args+=(--store files)                      # CSV files in catalog/ (use --store d1 to write to Cloudflare D1)
           [ -n "$t" ] && args+=(--types "$t")
           if [ "$SITE" = "_extra" ]; then
             [ -n "$URL" ] && args+=(--url "$URL")
@@ -155,6 +187,22 @@ jobs:
             args+=(--sites "$SITE")
           fi
           python scripts/scan.py "${args[@]}"
+      - name: Commit catalog
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "scan-bot"
+          git config user.email "scan-bot@users.noreply.github.com"
+          git add -A catalog
+          if git diff --cached --quiet; then echo "nothing new to commit"; exit 0; fi
+          git commit -q -m "catalog: ${{ matrix.site }}"
+          for i in 1 2 3 4 5 6; do                  # four jobs push at the same time: fetch, rebase, retry
+            git fetch -q origin "${{ github.ref_name }}" && git rebase -q "origin/${{ github.ref_name }}" \
+              && git push -q origin "HEAD:${{ github.ref_name }}" && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep $((RANDOM % 15 + 5))
+          done
+          echo "::error::could not push the catalog"; exit 1
       - name: Summary
         if: always()
         shell: bash
@@ -167,3 +215,26 @@ jobs:
         with:
           path: scan_state
           key: scan-${{ matrix.site }}-${{ github.run_id }}
+  index:
+    needs: [plan, scan]
+    if: always() && needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ github.ref_name }}"}      # the newest commit, with every site's files
+      - run: python3 scripts/build_index.py
+      - name: Commit index
+        shell: bash
+        run: |
+          git config user.name "scan-bot"
+          git config user.email "scan-bot@users.noreply.github.com"
+          git add -A catalog
+          if git diff --cached --quiet; then echo "index unchanged"; exit 0; fi
+          git commit -q -m "catalog: index"
+          for i in 1 2 3 4 5 6; do
+            git fetch -q origin "${{ github.ref_name }}" && git rebase -q "origin/${{ github.ref_name }}" \
+              && git push -q origin "HEAD:${{ github.ref_name }}" && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep $((RANDOM % 15 + 5))
+          done
+          echo "::error::could not push the index"; exit 1

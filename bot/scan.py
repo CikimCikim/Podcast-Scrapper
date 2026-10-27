@@ -1,8 +1,9 @@
-# Only pages that carry at least one wanted file (pdf, audio ...) are written to D1.
+# Only pages that carry at least one wanted file (pdf, audio ...) are stored (CSV files in catalog/, or Cloudflare D1).
 # bot/scan.py - non-interactive site scanner (port of learning_sites_scanner.py): finds pages + downloadable files of
 # learning sites and writes the catalog to Cloudflare D1 (tables cat_sites / cat_pages / cat_files). Nothing is downloaded.
 from __future__ import annotations
 
+import csv
 import gzip
 import html as htmllib
 import json
@@ -13,6 +14,7 @@ import time
 from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from pathlib import Path
 from urllib.parse import quote, unquote, urldefrag, urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -43,6 +45,91 @@ SLEEP = time.sleep
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+
+# ---------------------------------------------------------------- CSV files (no limits, lives in git)
+class FileDb:
+    """Same interface as D1Sync, but keeps the catalog in plain files: <root>/<site>/pages.csv, files.csv and meta.json.
+    Columns are the same as the D1 tables cat_pages / cat_files, so the files can be imported into D1 later."""
+    PAGE_COLS = ("site_id", "url", "section", "title", "descr", "body", "via", "found_at")
+    FILE_COLS = ("site_id", "url", "page_url", "section", "ext", "name", "bytes", "found_at")
+
+    def __init__(self, root: str) -> None:
+        self.root = Path(root)
+        self.pages: dict[str, dict] = {}
+        self.files: dict[str, dict] = {}
+        self.dirty: set[str] = set()                 # sites whose files.csv must be rewritten (a file moved to another page)
+
+    def _load(self, site: str) -> None:
+        if site in self.pages:
+            return
+        self.pages[site], self.files[site] = {}, {}
+        for name, cols, store in (("pages.csv", self.PAGE_COLS, self.pages[site]), ("files.csv", self.FILE_COLS, self.files[site])):
+            path = self.root / site / name
+            if path.exists():
+                with open(path, newline="", encoding="utf-8") as f:
+                    for r in csv.DictReader(f):
+                        store[r["url"]] = tuple(r[c] for c in cols)
+
+    def _append(self, site: str, name: str, cols: tuple, rows: list) -> None:
+        if not rows:
+            return
+        path = self.root / site / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(cols)
+            w.writerows(rows)
+
+    def known(self, site: str) -> tuple[set, set]:
+        self._load(site)
+        return set(self.pages[site]), set(self.files[site])
+
+    def put_pages(self, rows: list[tuple]) -> None:
+        if rows:
+            site = rows[0][0]
+            self._load(site)
+            new = [r for r in rows if r[1] not in self.pages[site]]      # like INSERT OR IGNORE
+            self.pages[site].update({r[1]: r for r in new})
+            self._append(site, "pages.csv", self.PAGE_COLS, new)
+
+    def put_files(self, rows: list[tuple]) -> None:
+        if rows:
+            site = rows[0][0]
+            self._load(site)
+            new = [r for r in rows if r[1] not in self.files[site]]
+            self.files[site].update({r[1]: r for r in new})
+            self._append(site, "files.csv", self.FILE_COLS, new)
+
+    def move_file(self, site: str, url: str, page_url: str, section: str) -> None:
+        self._load(site)
+        if url in self.files[site]:
+            r = list(self.files[site][url])
+            r[2], r[3] = page_url, section
+            self.files[site][url] = tuple(r)
+            self.dirty.add(site)
+
+    def site_row(self, site: dict, status: str) -> None:
+        sid = site["id"]
+        self._load(sid)
+        d = self.root / sid
+        d.mkdir(parents=True, exist_ok=True)
+        if sid in self.dirty:                        # rewrite files.csv with the moved files, atomically
+            tmp = d / "files.csv.tmp"
+            with open(tmp, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(self.FILE_COLS)
+                w.writerows(self.files[sid].values())
+            os.replace(tmp, d / "files.csv")
+            self.dirty.discard(sid)
+        meta = {"site_id": sid, "name": site["name"], "base": site["base"], "tags": site.get("tags", ""), "status": status,
+                "last_scan": int(time.time()), "pages": len(self.pages[sid]), "files": len(self.files[sid])}
+        (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def finish(self) -> None:
+        pass
 
 
 # ---------------------------------------------------------------- D1 (sync REST)
@@ -100,6 +187,12 @@ class D1Sync:
             part = rows[i:i + self.CHUNK_FILES]
             self.q("INSERT OR IGNORE INTO cat_files(site_id,url,page_url,section,ext,name,bytes,found_at) VALUES "
                    + ",".join(["(?,?,?,?,?,?,?,?)"] * len(part)), [x for r in part for x in r])
+
+    def move_file(self, site: str, url: str, page_url: str, section: str) -> None:
+        self.q("UPDATE cat_files SET page_url=?, section=? WHERE site_id=? AND url=?", [page_url, section, site, url])
+
+    def finish(self) -> None:
+        pass
 
     def site_row(self, site: dict, status: str) -> None:
         self.q("INSERT INTO cat_sites(site_id,name,base,tags,status,last_scan,pages,files) VALUES (?,?,?,?,?,?,"
@@ -241,7 +334,7 @@ def body_excerpt(html: str, n: int = BODY_CHARS) -> str:
 
 # ---------------------------------------------------------------- scanner
 class Scanner:
-    def __init__(self, site: dict, net: Net, db: D1Sync, state_dir: str, deadline: float, measure: bool = True,
+    def __init__(self, site: dict, net: Net, db, state_dir: str, deadline: float, measure: bool = True,
                  rescan_days: int = 7, fresh: bool = False, exts: tuple = EXTS) -> None:
         self.site, self.net, self.db = site, net, db
         self.id = site["id"]
@@ -260,6 +353,8 @@ class Scanner:
         self.state_path = os.path.join(state_dir, f"{self.id}.json.gz")
         self.robots = None
         self.max_pages = site.get("max_pages", MAX_PAGES)
+        self.skip_known = bool(site.get("skip_known"))   # true: never re-fetch a page that is already in D1 (links in it are not followed)
+        self.skipped = 0                                 # pages not fetched because D1 already has them
         self.st: dict = {}
         self.refused = False
         self.known_pages: set = set()
@@ -373,7 +468,17 @@ class Scanner:
         with ThreadPoolExecutor(self.workers) as ex:
             while queue and len(pages) < self.max_pages and not self.out_of_time():
                 batch = [queue.popleft() for _ in range(min(self.workers * 3, len(queue)))]
-                htmls = list(ex.map(self.net.page, batch))
+                done = {u for u in batch if u in self.known_pages and (self.skip_known or st["via"].get(u) == "sitemap")}
+                if done:                                 # already in D1: a sitemap url needs no link discovery, skip_known sites opt in
+                    self.skipped += len(done)
+                    batch = [u for u in batch if u not in done]
+                    if not batch:
+                        continue
+                try:
+                    htmls = list(ex.map(self.net.page, batch))
+                except BaseException:                    # cancelled / SIGTERM: put the batch back so the next run still crawls it
+                    queue.extendleft(reversed(batch))
+                    raise
                 if not pages and sum(self.net.codes[c] for c in BLOCKED) + self.net.codes[0] >= BLOCK_STOP:
                     st["failed"].extend(u for u, h in zip(batch, htmls) if h is None)
                     self.refused = True
@@ -550,7 +655,7 @@ class Scanner:
                 st["pages"][u]["b"] = ""             # pages without files are not stored in D1; keep state small
         self.known_pages.update(r[1] for r in page_rows)
         self.known_files.update(r[1] for r in file_rows)
-        log(f"[{self.id}] D1 +{len(page_rows)} pages +{len(file_rows)} files")
+        log(f"[{self.id}] saved +{len(page_rows)} pages +{len(file_rows)} files")
 
     def reassign_owners(self) -> None:
         """A file linked from several pages is stored once. Early on it may be filed under a hub page (e.g. 'all PDFs');
@@ -564,7 +669,7 @@ class Scanner:
         moved = 0
         for f, (_, u) in best.items():
             if f in st["owner"] and st["owner"][f] != u:
-                self.db.q("UPDATE cat_files SET page_url=?, section=? WHERE site_id=? AND url=?", [u, self.section_of(u), self.id, f])
+                self.db.move_file(self.id, f, u, self.section_of(u))
                 st["owner"][f] = u
                 moved += 1
         if moved:
@@ -595,6 +700,9 @@ class Scanner:
             self.st["failed"] = []
             self.known_pages = {u for u, p in st["pages"].items() if p.get("ok")}
             self.known_files = {f for u in self.known_pages for f in st["pages"][u]["f"]}
+            kp, kf = self.db.known(self.id)                    # a resumed run must also know what earlier runs wrote to D1
+            self.known_pages |= kp
+            self.known_files |= kf
         try:                                                       # whatever happens, keep the progress made so far
             if self.site.get("ia"):
                 self.ia_crawl()
@@ -607,10 +715,12 @@ class Scanner:
             self.save_state()
         if not self.st["queue"] and not self.site.get("ia"):
             self.reassign_owners()
-        empty = not self.site.get("ia") and not self.st["pages"] and (not self.st["queue"] or self.refused)
+        empty = not self.site.get("ia") and not self.st["pages"] and not self.skipped and (not self.st["queue"] or self.refused)
         if not self.st["queue"] and not empty:
             self.st["done_at"] = int(time.time())          # an empty scan must be retried, never "up to date"
         self.save_state()
+        if self.skipped:
+            log(f"[{self.id}] skipped {self.skipped} pages already in D1")
         status = "blocked" if empty else "complete" if not self.st["queue"] else "partial"
         self.db.site_row(self.site, status)
         log(f"[{self.id}] {status}: {len(self.st['pages'])} pages, {len(self.st['queue'])} queued, {len(self.st['failed'])} failed")

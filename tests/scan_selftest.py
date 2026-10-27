@@ -109,12 +109,51 @@ with tempfile.TemporaryDirectory() as tmp:
         Scanner(site, Net(), db, tmp3, time.monotonic() + 60, exts=(".mp3",)).run()
         assert {r["ext"] for r in con.execute("select ext from cat_files")} == {"mp3"}
         assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 2     # /listen/ and /hub.html
+# pages already in D1: a sitemap url is not fetched again; skip_known skips every known page
+class Count(Net):
+    def __init__(self): super().__init__(); self.got = []
+    def page(self, url): self.got.append(url); return super().page(url)
+con.execute("delete from cat_pages"); con.execute("delete from cat_files"); con.commit()
+with tempfile.TemporaryDirectory() as tmp9:
+    Scanner(site, Net(), db, tmp9, time.monotonic() + 60).run()
+    sm_url = f"{site['base']}/grammar/c.html"                                       # in the sitemap; pretend an earlier run stored it
+    con.execute("insert into cat_pages(site_id,url,section,title,descr,body,via,found_at) values('t',?,'grammar','','','','sitemap',1)", (sm_url,)); con.commit()
+    in_d1 = {r["url"] for r in con.execute("select url from cat_pages")}
+    n2, n3 = Count(), Count()
+    sc2 = Scanner(site, n2, db, tmp9 + "/b", time.monotonic() + 60, fresh=True)
+    assert sc2.run() == "complete" and sm_url not in n2.got and sc2.skipped == 1, (n2.got, sc2.skipped)
+    sc3 = Scanner({**site, "skip_known": True}, n3, db, tmp9 + "/c", time.monotonic() + 60, fresh=True)
+    assert sc3.run() == "complete" and not (set(n3.got) & in_d1) and sc3.skipped >= 1, (n3.got, sc3.skipped)
+    assert con.execute("select count(*) c from cat_pages").fetchone()["c"] == 6       # 5 + the one inserted by hand: nothing written twice
 # the site dropdown in scan.yml must list every id of sites.json (regenerate it when you add a site)
 import json
 ids = [x["id"] for x in json.loads((Path(__file__).resolve().parent.parent / "sites.json").read_text("utf-8"))["sites"]]
 yml = (Path(__file__).resolve().parent.parent / ".github/workflows/scan.yml").read_text("utf-8")
 missing = [i for i in ids if f"          - {i}\n" not in yml]
 assert not missing, f"add to the site dropdown in scan.yml: {missing}"
+# CSV backend: same result as D1, no duplicates on a second run, index builder works
+import csv, json as _json, os, subprocess, sys
+from bot.scan import FileDb
+with tempfile.TemporaryDirectory() as tf, tempfile.TemporaryDirectory() as ts:
+    assert Scanner(site, Net(), FileDb(tf), ts, time.monotonic() + 60).run() == "complete"
+    rd = lambda n: list(csv.DictReader(open(f"{tf}/t/{n}.csv", newline="", encoding="utf-8")))
+    pg, fl = rd("pages"), rd("files")
+    assert len(pg) == 5 and {r["url"].replace(base, "") for r in pg} == {"/", "/grammar/a.html", "/grammar/b.html", "/listen/", "/hub.html"}
+    own = {r["url"].replace(base, ""): r["page_url"].replace(base, "") for r in fl}
+    assert own["/files/a.pdf"] == "/grammar/a.html" and own["/x.pdf"] == "/", own          # moved off the hub page, in the file too
+    meta = _json.load(open(f"{tf}/t/meta.json"))
+    assert meta["status"] == "complete" and meta["pages"] == 5 and meta["files"] == len(fl)
+    Scanner(site, Net(), FileDb(tf), ts + "/again", time.monotonic() + 60, fresh=True).run()   # known rows are read from the CSV
+    assert len(rd("pages")) == 5 and len(rd("files")) == len(fl)
+    subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts/build_index.py"), tf], check=True, capture_output=True)
+    assert "| [t](t/) | complete | 5 |" in open(f"{tf}/INDEX.md", encoding="utf-8").read() and os.path.exists(f"{tf}/sites.csv")
+# the two checkbox forms (scan-sites-1/2.yml) must hold every site exactly once (regenerate: python scripts/gen_scan_forms.py)
+import re
+boxes = []
+for n in (1, 2):
+    boxes += re.findall(r"^      s_(\w+):", (Path(__file__).resolve().parent.parent / f".github/workflows/scan-sites-{n}.yml").read_text("utf-8"), re.M)
+assert sorted(boxes) == sorted(ids), f"checkbox forms out of date, run scripts/gen_scan_forms.py: {set(ids) ^ set(boxes)}"
+assert "workflow_call:" in yml
 # D1 answering 401 'Authentication error' a few times, then working: the run must survive
 calls = {"n": 0}
 inner = db.poster
@@ -166,4 +205,22 @@ with tempfile.TemporaryDirectory() as tmp7:
     t0 = time.monotonic()
     assert Scanner(nsite, net7, db, tmp7, time.monotonic() + 60).run() == "blocked"
     assert net7.fails[f"127.0.0.1:{dead_port}"] >= scan.DEAD_AFTER and time.monotonic() - t0 < 10
+# cancel in the middle of a crawl: popped URLs go back to the queue and the state file is written
+class Boom(Net):
+    n = 0
+    def page(self, url):
+        Boom.n += 1
+        if Boom.n > 4:                                   # robots x2 + sitemap, then the first crawl batch passes
+            raise SystemExit(143)
+        return super().page(url)
+db.poster = inner
+with tempfile.TemporaryDirectory() as tmp8:
+    sc = Scanner({**site, "id": "c"}, Boom(), db, tmp8, time.monotonic() + 60, fresh=True)
+    try:
+        sc.run(); raise AssertionError("should have been interrupted")
+    except SystemExit:
+        pass
+    assert os.path.exists(os.path.join(tmp8, "c.json.gz"))
+    assert len(sc.st["queue"]) == 2 and not sc.st["failed"], sc.st["queue"]      # seed + sitemap url, both put back
+    assert Scanner({**site, "id": "c"}, Net(), db, tmp8, time.monotonic() + 60).run() == "complete"   # next run finishes it
 print("scan selftest OK")
