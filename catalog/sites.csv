@@ -1,0 +1,7 @@
+site_id,name,base,tags,status,last_scan,pages,files,gb,unknown,types
+bbc,BBC Learning English,https://www.bbc.co.uk,lrgv,imported from D1,1793046002,203,426,2.09,0,pdf:270 mp3:155 wav:1
+bne,Breaking News English,https://breakingnewsenglish.com,rlk,imported from D1,1793046898,6365,16562,17.86,19,mp3:12974 pdf:3586 ogg:1 doc:1
+busyteacher,BusyTeacher worksheets,https://busyteacher.org,kgt,imported from D1,1793046958,12,13,0.0,7,pdf:8 doc:4 docx:1
+elllo,Elllo (listening),https://elllo.org,lv,imported from D1,1793046990,2345,9325,5.42,441,mp3:8056 pdf:869 ogg:398 zip:2
+peg,Perfect English Grammar,https://www.perfect-english-grammar.com,gk,imported from D1,1793045964,406,527,0.04,2,pdf:422 mp3:105
+voa,VOA Learning English,https://learningenglish.voanews.com,rlv,imported from D1,1793046957,2757,7343,193.73,7,mp4:4789 mp3:2393 pdf:161

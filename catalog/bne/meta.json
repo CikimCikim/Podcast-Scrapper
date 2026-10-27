@@ -1,0 +1,10 @@
+{
+ "site_id": "bne",
+ "name": "Breaking News English",
+ "base": "https://breakingnewsenglish.com",
+ "tags": "rlk",
+ "status": "imported from D1",
+ "last_scan": 1793046898,
+ "pages": 6365,
+ "files": 16562
+}

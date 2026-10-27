@@ -1,0 +1,10 @@
+{
+ "site_id": "bbc",
+ "name": "BBC Learning English",
+ "base": "https://www.bbc.co.uk",
+ "tags": "lrgv",
+ "status": "imported from D1",
+ "last_scan": 1793046002,
+ "pages": 203,
+ "files": 426
+}
