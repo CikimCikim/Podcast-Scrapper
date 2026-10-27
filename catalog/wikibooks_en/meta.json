@@ -1,0 +1,10 @@
+{
+ "site_id": "wikibooks_en",
+ "name": "Wikibooks (English books)",
+ "base": "https://en.wikibooks.org",
+ "tags": "go",
+ "status": "blocked",
+ "last_scan": 1793081339,
+ "pages": 0,
+ "files": 0
+}
