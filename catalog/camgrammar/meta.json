@@ -1,0 +1,10 @@
+{
+ "site_id": "camgrammar",
+ "name": "Cambridge Grammar",
+ "base": "https://dictionary.cambridge.org",
+ "tags": "g",
+ "status": "complete",
+ "last_scan": 1793080388,
+ "pages": 1041,
+ "files": 4
+}
