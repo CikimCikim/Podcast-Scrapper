@@ -1,0 +1,10 @@
+{
+ "site_id": "ielts",
+ "name": "IELTS (British Council)",
+ "base": "https://takeielts.britishcouncil.org",
+ "tags": "e",
+ "status": "blocked",
+ "last_scan": 1793080544,
+ "pages": 0,
+ "files": 0
+}
